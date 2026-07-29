@@ -29,6 +29,13 @@
       "when": 1785352850967,
       "tag": "0003_ledger_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785352860000,
+      "tag": "0004_ledger_hardening",
+      "breakpoints": true
     }
   ]
 }

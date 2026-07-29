@@ -24,8 +24,7 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M1 — domain schema. Update this line whenever the
-focus changes.
+**Now working on.** M2 — identity and RLS.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -158,25 +157,25 @@ lines, running balance. Not a points bar.
 *Done when `pnpm seed` gives a database you can develop against.*
 
 ## M1 — Domain schema
-- [ ] All tables per spec, pgEnums for every enumerated type
-- [ ] Ledger immutability trigger (raises on UPDATE/DELETE)
-- [ ] member_balance(uuid) SQL function
-- [ ] Unique constraints: (round_id, user_id, direction),
+- [x] All tables per spec, pgEnums for every enumerated type
+- [x] Ledger immutability trigger (raises on UPDATE/DELETE)
+- [x] member_balance(uuid) SQL function
+- [x] Unique constraints: (round_id, user_id, direction),
       idempotency_key, (round_id, from_user), (user_id, club_id),
       (application_id, role)
-- [ ] Indexes on all FKs, plus requests(state, date_from) and
+- [x] Indexes on all FKs, plus requests(state, date_from) and
       offers(request_id, state)
-- [ ] Drop health_check, point /api/health at `select 1`
-- [ ] `domain_events` — id, kind, entity, entity_id, payload jsonb,
+- [x] Drop health_check, point /api/health at `select 1`
+- [x] `domain_events` — id, kind, entity, entity_id, payload jsonb,
       created_at, processed_at nullable, attempts int
-- [ ] `host_availability` — id, user_id, club_id, course_id nullable,
+- [x] `host_availability` — id, user_id, club_id, course_id nullable,
       weekday or date range, capacity int, min_tier, note, active
-- [ ] `round_participants` handles non-member plus-ones — nullable
+- [x] `round_participants` handles non-member plus-ones — nullable
       user_id plus guest_name, is_member bool
-- [ ] `rounds` carries snapshotted form fields — dress, caddie fee,
+- [x] `rounds` carries snapshotted form fields — dress, caddie fee,
       guest fee copied from club_content at confirmation
-- [ ] `profiles.pace_preference` enum(brisk|steady|no_preference)
-- [ ] `requests.pace_preference` same enum
+- [x] `profiles.pace_preference` enum(brisk|steady|no_preference)
+- [x] `requests.pace_preference` same enum
 
 ## M2 — Identity and RLS
 - [ ] Magic link auth, no passwords, 90-day sessions
@@ -423,6 +422,10 @@ before renewal. The app should visibly change in the off-season:
   must survive or every counterparty's history breaks.
 - **Blind release failing quietly** — queue with retries. A cron that
   silently stops is invisible for months.
+- **TRUNCATE bypasses row triggers.** Append-only needs a
+  statement-level guard as well as the row-level one.
+- **Functions with mutable search_path** — Supabase's linter flags
+  them and it's a real injection surface. Always SET search_path.
 
 ---
 
@@ -822,10 +825,29 @@ Two HTML prototypes — the app and the landing page — are the visual
 spec for M4–M7. Honours board, not startup. Update them when the
 direction changes rather than letting the direction live only in chat.
 
+**2026-07-29 — Cancelled rounds are terminal.**
+A cancelled round is reversed with a compensating entry and never
+re-confirmed. If the round happens after all, it is a new round. This
+keeps UNIQUE (round_id, user_id, direction) intact and leaves an
+honest audit trail of what was cancelled and what was rearranged.
+
+**2026-07-29 — Ledger amounts are always positive.**
+Direction carries the sign. A CHECK enforces amount > 0, closing the
+route where a negative credit acts as a debit without breaching the
+append-only rule.
+
 ---
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-29 — M1 complete.** Domain schema applied: 24 tables, 15
+enums, all FK indexes, check constraints on club tiers and course
+bearings. Ledger hardened — append-only trigger, TRUNCATE guard,
+amount > 0 check, member_balance() with pinned search_path.
+Verified in the database: two triggers present, six constraints on
+ledger_entries, member_balance returns 0, and an attempted negative
+credit was rejected by the check constraint ahead of the foreign key.
 
 **2026-07-29 — M0 partial.** Scaffold complete: Next 16, TypeScript
 strict, Tailwind, Drizzle, Supabase EU-Ireland, Zod env validation,

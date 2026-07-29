@@ -38,6 +38,24 @@ ROADMAP.md in the project root is the source of truth for project state, phases 
 - A club is not a course; rounds reference `club_courses`.
 - Tee times store local time plus timezone, never UTC alone.
 
+## Raw SQL objects (not tracked by Drizzle)
+
+These objects were created by hand in raw SQL migrations (0003, 0004)
+and do not appear in `schema.ts` or any drizzle-kit snapshot:
+
+- trigger `ledger_entries_no_update_or_delete` + function
+  `ledger_entries_immutable()`
+- trigger `ledger_entries_no_truncate` + function
+  `ledger_entries_no_truncate()`
+- function `member_balance(uuid)`
+- constraint `ledger_entries_amount_positive_check`
+- table and constraint comments on `ledger_entries`
+
+They are managed by hand in raw SQL migrations. Do not add them to
+`schema.ts` — drizzle-kit would then generate a duplicate CREATE/ADD
+and the migration would fail against a database where they already
+exist. Changes to any of them go in a new raw SQL migration.
+
 ## Design tokens
 
 For later UI work.
