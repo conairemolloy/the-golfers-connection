@@ -8,6 +8,27 @@
       "when": 1785350246127,
       "tag": "0000_shallow_kingpin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785352672348,
+      "tag": "0001_drop_health_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785352841473,
+      "tag": "0002_domain_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785352850967,
+      "tag": "0003_ledger_immutability",
+      "breakpoints": true
     }
   ]
 }

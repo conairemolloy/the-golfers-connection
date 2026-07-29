@@ -24,6 +24,16 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
+**Now working on.** M1 — domain schema. Update this line whenever the
+focus changes.
+
+**Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
+(C1–C4) run at the same time. Content is not code and does not block
+on it — it decides launch quality more than any feature does.
+
+**Design reference.** /design holds the app and landing prototypes.
+They are the visual spec.
+
 **The three things that matter most.**
 1. The ledger must be perfect. Everything else is rebuildable.
 2. Host ratio is the health metric. Below 30% the network is dying
@@ -140,7 +150,8 @@ lines, running balance. Not a points bar.
 ## M0 — Foundations
 - [x] Repo, CI, Drizzle migrations
 - [x] Env validation, health route
-- [ ] Seed script — 40 clubs, 60 members, 200 rounds, populated ledger
+- [ ] Seed script — real club list from src/db/seed/clubs.json,
+      plus 60 synthetic members, 200 rounds, populated ledger
 - [ ] Sentry wired
 - [ ] Vercel preview deploys
 
@@ -358,6 +369,23 @@ to host that has nothing to do with goodwill.*
 *Highest value, highest care. Done wrong it looks like selling
 memberships and it's fatal.*
 
+## P12 — Winter Mode
+> The season runs April to October. Five months where the core loop has
+> nothing to do — and that's exactly when subscription churn happens.
+
+If the home screen in January is an empty Book, members drift off right
+before renewal. The app should visibly change in the off-season:
+
+- [ ] Matchplay results and order of merit take the top of the home
+      screen
+- [ ] Next season's trip planning surfaced
+- [ ] The Archive — last season's rounds, best score, courses added
+- [ ] The Access Index published (November)
+- [ ] Ballot for member days opens
+- [ ] Club maintenance calendars for the coming season
+
+*Designed empty states, never a blank Book with a spinner.*
+
 ---
 
 ## Integrations
@@ -422,7 +450,6 @@ while the network quietly fails.
 - [ ] Are tier rules hard blocks or soft warnings?
 - [ ] Does the ledger threshold lock requests or just flag them?
 - [ ] Founding membership price point
-- [ ] Whether trips are introducer-only from day one (they should be)
 
 ---
 
@@ -498,6 +525,11 @@ week rather than the round, none have made clubs participants.
 | **Discretion mode** | Member sees the Book; the Book doesn't see him. No directory listing |
 | **Endorsement** | A proposer or seconder vouching for an applicant |
 | **Invitation chain** | Who proposed whom, traceable to the founding circle |
+| **Availability** | A host's standing declaration of when he'll take visitors. Matched automatically |
+| **The Introduction** | Auto-posted first message in a round thread — who the guest is |
+| **Graceful decline** | One-tap no, optionally redirected to another date or member |
+| **Plus-one** | A non-member brought by a member. The member carries both debits |
+| **Domain event** | A recorded fact other parts of the system react to |
 
 ---
 
@@ -585,6 +617,8 @@ they describe.
 | `club_events` | Maintenance, closures, competitions, news |
 | `club_releases` | Club-side quiet availability (P6) |
 | `audit_log` | Every admin action |
+| `domain_events` | Emitted events, processed separately. Replayable |
+| `host_availability` | A host's declared windows — weekday, capacity, min tier |
 | `feature_flags` | Per-key, optionally scoped |
 
 ---
@@ -652,22 +686,7 @@ Never a delete. Decide it now, not in a panic.
 
 ---
 
-## Winter Mode
-> The season runs April to October. Five months where the core loop has
-> nothing to do — and that's exactly when subscription churn happens.
-
-If the home screen in January is an empty Book, members drift off right
-before renewal. The app should visibly change in the off-season:
-
-- [ ] Matchplay results and order of merit take the top of the home
-      screen
-- [ ] Next season's trip planning surfaced
-- [ ] The Archive — last season's rounds, best score, courses added
-- [ ] The Access Index published (November)
-- [ ] Ballot for member days opens
-- [ ] Club maintenance calendars for the coming season
-
-*Designed empty states, never a blank Book with a spinner.*
+See P12 — Winter Mode.
 
 ---
 
@@ -787,6 +806,21 @@ revenue to justify them.
 **2026-07-29 — Supabase EU-Ireland, Drizzle, Next 16, magic link auth.**
 RLS is the entire security model. Ireland keeps data in the EU and
 close to members.
+
+**2026-07-29 — Plus-ones: the member carries both debits.**
+A member bringing a non-member friend takes two debits, not one. Keeps
+the reciprocity incentive honest — otherwise a member could consume
+double the hosting while owing single.
+
+**2026-07-29 — Cancellation reverses, never deletes.**
+A confirmed round that falls through gets a compensating ledger entry
+with a reason. The original row stays. Preserves the append-only
+invariant and leaves an auditable trail.
+
+**2026-07-29 — Design reference lives in /design.**
+Two HTML prototypes — the app and the landing page — are the visual
+spec for M4–M7. Honours board, not startup. Update them when the
+direction changes rather than letting the direction live only in chat.
 
 ---
 
