@@ -156,6 +156,16 @@ lines, running balance. Not a points bar.
 - [ ] Indexes on all FKs, plus requests(state, date_from) and
       offers(request_id, state)
 - [ ] Drop health_check, point /api/health at `select 1`
+- [ ] `domain_events` — id, kind, entity, entity_id, payload jsonb,
+      created_at, processed_at nullable, attempts int
+- [ ] `host_availability` — id, user_id, club_id, course_id nullable,
+      weekday or date range, capacity int, min_tier, note, active
+- [ ] `round_participants` handles non-member plus-ones — nullable
+      user_id plus guest_name, is_member bool
+- [ ] `rounds` carries snapshotted form fields — dress, caddie fee,
+      guest fee copied from club_content at confirmation
+- [ ] `profiles.pace_preference` enum(brisk|steady|no_preference)
+- [ ] `requests.pace_preference` same enum
 
 ## M2 — Identity and RLS
 - [ ] Magic link auth, no passwords, 90-day sessions
@@ -174,6 +184,9 @@ round_participants. Test every one.*
 - [ ] Unit tests: double-write, out-of-order confirmation, corrections
 - [ ] Property test: balance always equals sum of entries
 - [ ] Parallel-request test for the confirm race
+- [ ] Cancellation reversal — compensating entry with a reason,
+      never a delete. Decided path before it's needed in anger.
+- [ ] Plus-one rule: the member carries the debit for his guest too
 
 *The only thing that must be perfect. Everything else is rebuildable in
 a weekend.*
@@ -185,6 +198,12 @@ a weekend.*
 - [ ] Request expiry job
 - [ ] Playwright: request → offer → accept → confirm → ledger entry →
       balance moves
+- [ ] Host availability matching — a host declares a window once,
+      matching runs automatically, he's nudged only on a fit
+- [ ] Graceful decline — one tap: not this time / try me in September /
+      ask Jim at Castlerock instead
+- [ ] Unfilled request capture — expired-with-no-offer rows retained
+      and queryable, never discarded
 
 ## M5 — Correspondence
 - [ ] Threads on accepted offers
@@ -192,6 +211,9 @@ a weekend.*
 - [ ] Round card pinned at top of round thread
 - [ ] Trip group threads
 - [ ] Test asserting no thread-from-profile code path exists
+- [ ] Auto-posted introduction as the first entry in every round
+      thread — name, club, member since, handicap, proposer, times
+      hosted
 
 ## M6 — Clubs
 - [ ] Club pages, club_content form guide
@@ -199,6 +221,7 @@ a weekend.*
 - [ ] Guest fee, member counts, access difficulty
 - [ ] Weather via Open-Meteo, 30-min cache per course
 - [ ] Wind line derived from out_bearing / in_bearing vs wind direction
+- [ ] Form snapshot written onto the round at confirmation
 
 *"Out into it, home downwind" is the detail members will talk about.
 Two integers per course.*
@@ -244,6 +267,8 @@ a report without asking anything.*
 - [ ] Daily digest: new requests matching your club and tier
 - [ ] Per-kind preferences
 - [ ] SPF, DKIM, DMARC green; test send lands in Gmail and Outlook
+- [ ] ICS calendar feed — read-only subscription of confirmed rounds
+      and fixtures
 
 *Digest, not firehose. This audience will not tolerate constant pings.*
 
@@ -444,3 +469,331 @@ week rather than the round, none have made clubs participants.
 - Clubs recommending it rather than tolerating it
 - A network still running in twenty years, because it optimised for
   survival rather than extraction
+
+---
+
+## Glossary
+> Use these words exactly. Domain language drift is how a schema ends
+> up with three names for one thing.
+
+| Term | Meaning |
+|---|---|
+| **The Book** | The feed of open requests. Not "the marketplace", not "the feed" |
+| **Request** | A member saying where he's travelling and when. Trip-shaped, names several clubs |
+| **Offer** | A host responding to a request with a specific club, course and tee time |
+| **Round** | An offer that was accepted and played. Created on acceptance, settled on mutual confirmation |
+| **Host / Guest** | Roles on a round. A member is a host at his own club, a guest elsewhere |
+| **The Ledger** | Double-entry record. Hosting credits, being hosted debits |
+| **Standing** | Derived from ledger balance plus released feedback. Good, or Under review. Never a score |
+| **Tier** | 1–4, world/national/regional/local. You may request within your tier or below |
+| **The Form** | A club's dress code, phones, trolleys, caddies, after-golf customs. The most useful screen in the app |
+| **The Card** | The pinned summary at the top of a round thread — tee time, wind, dress, caddie fee, host's number |
+| **The Quiet Word** | Private channel for reporting something serious. Never scored, never aggregated, goes to admin |
+| **Marks** | Unattributed positive tags after a round: kept up, knew the form, good company, straight with arrangements |
+| **The Passport** | Verified record of courses played, stamped by the host |
+| **Games** | Short-notice fourballs. Nothing to do with access |
+| **The Diary** | Curated member days and the network Open, filled by ballot |
+| **The Access Index** | Annual ranking derived from requests per place filled |
+| **Cover** | Group third-party liability insurance, included in membership |
+| **Discretion mode** | Member sees the Book; the Book doesn't see him. No directory listing |
+| **Endorsement** | A proposer or seconder vouching for an applicant |
+| **Invitation chain** | Who proposed whom, traceable to the founding circle |
+
+---
+
+## Product Constraints
+> The audience, stated plainly, because it should constrain every
+> design decision.
+
+The typical member is 55–70, wealthy, traditional, sceptical of apps,
+and will most often open this on a phone in a links car park with one
+bar of signal.
+
+- **Magic links, never passwords.** They will lose a password and they
+  will not use a password manager.
+- **Large tap targets, high contrast.** Assume reading glasses are in
+  the car.
+- **No jargon, no cleverness in copy.** "Offer to host", never
+  "Connect".
+- **Reads must tolerate bad signal.** Cache the Card and the Form so a
+  member arriving at a strange club can still see the dress code with
+  no reception.
+- **Every screen survives a first-time user with no onboarding.** If it
+  needs a tour, it's wrong.
+- **Nothing may look like a startup.** Restraint is the credibility
+  signal for this audience.
+
+---
+
+## Runbook
+> How to pick this up cold.
+
+```bash
+pnpm dev              # dev server, localhost:3000
+pnpm db:generate      # generate migration from schema.ts
+pnpm db:migrate       # apply migrations
+pnpm db:studio        # browse the database
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+```
+
+**Environment** — `.env.local`, never committed. Four variables:
+`DATABASE_URL` (session pooler, port 5432),
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+(dashboard labels this "publishable"), `SUPABASE_SERVICE_ROLE_KEY`.
+`.env.example` documents all four.
+
+**Where things live**
+```
+src/app          routes
+src/db           schema.ts, index.ts, migrations/
+src/lib          shared utilities, env.ts
+CLAUDE.md        conventions and domain rules
+ROADMAP.md       this file — project state, source of truth
+```
+
+**Branching** — one branch per milestone, Vercel preview deploy per
+branch, merge when green. Commit ROADMAP.md updates alongside the work
+they describe.
+
+---
+
+## Data Model Quick Reference
+
+| Table | Purpose |
+|---|---|
+| `profiles` | Member record, extends auth.users |
+| `clubs` | Club, tier, region, consent status, guest fee |
+| `club_courses` | A club has many courses. Holds out/in bearings for the wind line |
+| `memberships` | User ↔ club, with three-state verification |
+| `verifications` | Audit of each check: identity, club, handicap, cover |
+| `handicaps` | Index, source, locked against hand-editing |
+| `invitations` | Codes, issuer, expiry, redemption |
+| `applications` | Joining state machine |
+| `endorsements` | Proposer and seconder |
+| `requests` | Where a member wants to play, and when |
+| `request_targets` | Clubs a request names |
+| `offers` | A host's response, with course and tee time |
+| `rounds` | An accepted offer, with both confirmations |
+| `round_participants` | Who played, in what role |
+| `ledger_entries` | Append-only. The governance model |
+| `threads` / `thread_members` / `messages` | Correspondence |
+| `feedback` | Would-again plus marks, blind released |
+| `reports` | The quiet word. Never scored |
+| `club_content` | The form guide |
+| `club_events` | Maintenance, closures, competitions, news |
+| `club_releases` | Club-side quiet availability (P6) |
+| `audit_log` | Every admin action |
+| `feature_flags` | Per-key, optionally scoped |
+
+---
+
+## Testing Strategy
+> Two-person team. A test suite you resent is a test suite you skip.
+
+- **Heavy on the ledger, no exceptions.** Unit and property tests.
+  Balance always equals the sum of entries.
+- **Two Playwright journeys only:** application end to end, and
+  request → offer → confirm → ledger.
+- **The hostile member RLS suite is permanent.** It never gets deleted,
+  and it grows a case every time a table is added.
+- Everything else gets light coverage.
+
+---
+
+## Architecture Decisions
+
+### Domain events, not scattered side-effects
+
+A confirmed round must write the ledger, stamp the Passport, open the
+return-leg prompt, notify both sides and trigger feedback. If those live
+inside the confirm handler it becomes a monster and every new feature
+edits it.
+
+Emit to `domain_events`, handle subscribers separately, mark processed.
+With a two-person team this is the difference between a codebase you can
+still reason about at M9 and one you can't — and it makes replay
+possible when something fails silently.
+
+Events to emit from the start:
+`round.confirmed` · `offer.accepted` · `offer.declined` ·
+`request.expired` · `application.approved` · `feedback.released` ·
+`membership.lapsed`
+
+### Availability inverts the pull
+
+Member-pull alone puts the work on the wrong side and caps fill rate —
+it assumes hosts are watching the Book. They aren't.
+
+A host declares a window once ("Tuesdays and Thursdays in October, two
+places, Tier I and II"), matching runs automatically, and he hears from
+us only when something fits. This is the biggest single lever on
+time-to-first-offer.
+
+### Silence is the worst outcome
+
+An expiring offer reads as a snub. In a network built on courtesy that's
+corrosive. Every request must be closable with a graceful no, ideally a
+redirected one. A redirected no is worth more than a slow yes.
+
+### Snapshot, don't reference
+
+Dress codes and guest fees change. A Card from 2027 must show what was
+true in 2027. Copy the relevant `club_content` fields onto the round at
+confirmation — two minutes of work, and it's what makes the Archive
+trustworthy years later.
+
+### Cancellation is a decided path, not a hotfix
+
+A confirmed round can still fall through — illness, flooding — after the
+ledger has moved. The reversal is a compensating entry with a reason.
+Never a delete. Decide it now, not in a panic.
+
+---
+
+## Winter Mode
+> The season runs April to October. Five months where the core loop has
+> nothing to do — and that's exactly when subscription churn happens.
+
+If the home screen in January is an empty Book, members drift off right
+before renewal. The app should visibly change in the off-season:
+
+- [ ] Matchplay results and order of merit take the top of the home
+      screen
+- [ ] Next season's trip planning surfaced
+- [ ] The Archive — last season's rounds, best score, courses added
+- [ ] The Access Index published (November)
+- [ ] Ballot for member days opens
+- [ ] Club maintenance calendars for the coming season
+
+*Designed empty states, never a blank Book with a spinner.*
+
+---
+
+## Unfilled Requests Are the Asset
+> A request that expires with no offer is not a failure to discard.
+
+It is simultaneously:
+
+- **The Access Index.** Requests per place filled *is* the ranking
+- **The trigger for club-side release.** Demand evidence a secretary
+  can act on
+- **The most persuasive thing you can say to a club.** "Fourteen members
+  asked for your course in October. We filled one."
+- **Your own early warning.** A rising unfilled rate means supply is
+  failing before the host ratio shows it
+
+Retain every one. The row already exists; keeping it costs nothing.
+
+---
+
+## Seed Data Is Real Data
+
+Do not generate fake clubs. The seed script should load the actual
+~150-club reference list — names, tiers, regions, coordinates, bearings,
+guest fees — from a checked-in CSV or JSON under `src/db/seed/`.
+
+Dev and production then share one source of truth, and the C1/C2 content
+work and the seed script become the same job rather than two.
+
+Members and rounds stay synthetic. Clubs are real from day one.
+
+---
+
+## Small Things That Punch Above Their Weight
+
+- **The introduction** — auto-posted first message in every round
+  thread. Removes the awkwardness from the moment that matters most.
+- **Pace of play** — nobody asks and everyone cares. A slow guest is the
+  most common reason a host doesn't repeat. Field on profile and
+  request.
+- **Plus-ones** — a member will bring a non-member friend. Model it, and
+  decide the ledger rule: the member carries both debits.
+- **ICS feed** — this audience lives in Outlook. A few lines of code
+  puts the product where they actually look.
+
+---
+
+# Content Workstream
+> Parallel to the build. Not code, and it decides launch quality more
+> than any feature does.
+
+## C1 — Club list and tiering
+- [ ] ~150 launch clubs identified
+- [ ] Tier assigned 1–4 for each (Nicholl's judgement, not a ranking
+      panel)
+- [ ] Access difficulty 1–4
+- [ ] Region, coordinates, timezone
+
+## C2 — Course bearings
+- [ ] Out and in bearing recorded for every course
+
+*Nobody costs this and it's real work — satellite imagery, per course.
+It's what makes "out into it, home downwind" possible, and that line is
+the detail members will talk about.*
+
+## C3 — The Form
+- [ ] Dress on course, dress in clubhouse, phones, trolleys, caddies
+      and fee, after-golf, guest fee — per club
+
+*~150 clubs × 30 minutes ≈ 75 hours. Cannot be scraped reliably. A
+wrong dress code is worse than no dress code. Needs the M8 club content
+editor to be delegable.*
+
+## C4 — Maintenance calendars
+- [ ] Hollow-coring, aeration, closures for the coming season
+
+*No central source exists anywhere. One email to every secretary each
+February, then the Club View (P5) maintains it.*
+
+---
+
+## Decision Log
+> Dated, with reasons. Prevents re-litigating.
+
+**2026-07-29 — Membership fee, never commission on green fees.**
+Taking a cut of a guest fee is brokering tee times. It's what gets a
+member hauled in front of his committee and the platform a
+cease-and-desist. This is why the strongest incumbent is free.
+
+**2026-07-29 — Ledger as governance, not a committee.**
+Balance falls, network quietly closes, member hosts, it opens again.
+No reporting, no awkward conversations, self-enforcing.
+
+**2026-07-29 — Unattributed, not anonymous.**
+In a network this size a member can often work out who rated him.
+Promising anonymity and being caught out is worse than never promising
+it. The UI says "not attributed" and means it.
+
+**2026-07-29 — Depth in Ireland and Britain over global breadth.**
+Every competitor is broad and shallow. Cold-start is solved by depth.
+A Californian founder cannot replicate Nicholl's relationships by
+emailing secretaries.
+
+**2026-07-29 — Trips via a licensed partner operator, introducer only.**
+Selling golf plus accommodation makes you a package organiser, with
+bonding and licensing obligations. Referral fee instead, customer
+contracts with the operator.
+
+**2026-07-29 — A club is not a course.**
+Portrush has the Dunluce and the Valley. Modelling this late would make
+every round, stamp and ledger entry ambiguous.
+
+**2026-07-29 — PWA, not native.**
+App Store review and two codebases would eat months before there is any
+revenue to justify them.
+
+**2026-07-29 — Supabase EU-Ireland, Drizzle, Next 16, magic link auth.**
+RLS is the entire security model. Ireland keeps data in the EU and
+close to members.
+
+---
+
+## Changelog
+> Newest first. One entry per milestone completed.
+
+**2026-07-29 — M0 partial.** Scaffold complete: Next 16, TypeScript
+strict, Tailwind, Drizzle, Supabase EU-Ireland, Zod env validation,
+ESLint/Prettier. Repo private and pushed. health_check migration
+applied, /api/health green. Session pooler connection verified.
