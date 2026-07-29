@@ -1,5 +1,7 @@
 # Project conventions
 
+ROADMAP.md in the project root is the source of truth for project state, phases and invariants. Read it at the start of any session.
+
 > See [AGENTS.md](./AGENTS.md): this Next.js version may differ from training data — check `node_modules/next/dist/docs/` before relying on prior knowledge of its APIs.
 
 ## Stack
@@ -30,6 +32,11 @@
 ## Domain rules
 
 - Message threads may only be created by an accepted offer, an itinerary, or a fixture. There must be no code path that creates a thread from a user profile.
+- `ledger_entries` is append-only; corrections are new rows.
+- Balance is always derived via `member_balance()`, never stored.
+- Ledger entries are written on mutual confirmation only, never on offer acceptance.
+- A club is not a course; rounds reference `club_courses`.
+- Tee times store local time plus timezone, never UTC alone.
 
 ## Design tokens
 
