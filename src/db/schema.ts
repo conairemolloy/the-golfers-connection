@@ -216,11 +216,14 @@ export const profiles = pgTable(
     id: uuid("id")
       .primaryKey()
       .references(() => authUsers.id),
-    displayName: text("display_name").notNull(),
-    initials: text("initials").notNull(),
+    // Nullable: provisioned by the handle_new_user() trigger at signup,
+    // before the member has set a display name or initials themselves.
+    displayName: text("display_name"),
+    initials: text("initials"),
     discretionMode: boolean("discretion_mode").notNull().default(false),
     homeClubId: uuid("home_club_id").references(() => clubs.id),
     status: profileStatus("status").notNull().default("applicant"),
+    isAdmin: boolean("is_admin").notNull().default(false),
     joinedAt: timestamp("joined_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

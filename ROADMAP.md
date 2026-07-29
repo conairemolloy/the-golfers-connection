@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 29 July 2026*
+*Last updated: 30 July 2026*
 
 ---
 
@@ -166,20 +166,23 @@ lines, running balance. Not a points bar.
 - [x] Indexes on all FKs, plus requests(state, date_from) and
       offers(request_id, state)
 - [x] Drop health_check, point /api/health at `select 1`
-- [x] `domain_events` — id, kind, entity, entity_id, payload jsonb,
+- [ ] `domain_events` — id, kind, entity, entity_id, payload jsonb,
       created_at, processed_at nullable, attempts int
-- [x] `host_availability` — id, user_id, club_id, course_id nullable,
+- [ ] `host_availability` — id, user_id, club_id, course_id nullable,
       weekday or date range, capacity int, min_tier, note, active
-- [x] `round_participants` handles non-member plus-ones — nullable
+- [ ] `round_participants` handles non-member plus-ones — nullable
       user_id plus guest_name, is_member bool
-- [x] `rounds` carries snapshotted form fields — dress, caddie fee,
+- [ ] `rounds` carries snapshotted form fields — dress, caddie fee,
       guest fee copied from club_content at confirmation
-- [x] `profiles.pace_preference` enum(brisk|steady|no_preference)
-- [x] `requests.pace_preference` same enum
+- [ ] `profiles.pace_preference` enum(brisk|steady|no_preference)
+- [ ] `requests.pace_preference` same enum
+
+> Prompt F additions were specified after 0002 was generated — these
+> need a follow-up migration before M2's RLS can cover them.
 
 ## M2 — Identity and RLS
 - [ ] Magic link auth, no passwords, 90-day sessions
-- [ ] RLS policy on every table
+- [x] RLS policy on every table
 - [ ] hostile_member test fixture
 - [ ] Automated test: hostile member cannot read the directory, another
       member's ledger, another member's threads, or any table by direct
@@ -426,6 +429,16 @@ before renewal. The app should visibly change in the off-season:
   statement-level guard as well as the row-level one.
 - **Functions with mutable search_path** — Supabase's linter flags
   them and it's a real injection surface. Always SET search_path.
+- **Grants and policies are independent locks.** A table can have
+  correct policies and still be open if anon holds a grant. Check
+  information_schema.role_table_grants for anon after any schema change.
+- **SECURITY DEFINER bypasses the policy you just wrote.** Any such
+  function must authorise the caller itself, or it becomes the hole in
+  the wall. member_balance raises unless you ask for your own balance
+  or are an admin.
+- **New auth users have no profile row.** A trigger on auth.users
+  provisions it. Without that, is_onboarding() is false and signup dies
+  at step two.
 
 ---
 
@@ -836,10 +849,27 @@ Direction carries the sign. A CHECK enforces amount > 0, closing the
 route where a negative credit acts as a debit without breaching the
 append-only rule.
 
+**2026-07-30 — profiles.display_name and initials are nullable until
+member.** Magic-link signup knows only an email, so the provisioning
+trigger cannot supply a name. Nulls mean "not yet known" rather than a
+placeholder like 'Member', which would look like real data wherever it
+surfaced. A CHECK constraint enforces that both are present by the time
+status reaches 'member'.
+
 ---
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-30 — M2a complete.** RLS applied across all 24 public tables,
+44 policies, anon granted nothing anywhere. Five private.* helper
+functions outside the API surface. member_balance is SECURITY DEFINER
+and self-authorising. Tier enforcement lives in the request_targets
+INSERT policy, blind release in the feedback SELECT policy, and the
+no-thread-from-profile rule is enforced by granting SELECT only.
+Profiles are provisioned by a trigger on auth.users, so profiles needs
+no INSERT policy. Verified: zero anon grants, all tables RLS-enabled,
+audit_log deny-all.
 
 **2026-07-29 — M1 complete.** Domain schema applied: 24 tables, 15
 enums, all FK indexes, check constraints on club tiers and course
