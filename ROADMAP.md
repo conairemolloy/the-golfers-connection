@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 30 July 2026 (M4a complete — request creation and the Book query)*
+*Last updated: 31 July 2026 (M4b complete — offer lifecycle and mutual confirmation)*
 
 ---
 
@@ -24,8 +24,9 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M4 — the Book. Request creation and the Book query
-are done; the offer flow and mutual confirmation remain.
+**Now working on.** M4 — the Book. Request creation, the Book query, and
+the offer flow with mutual confirmation are done; host availability
+matching and graceful decline are M4c and remain.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -206,8 +207,8 @@ a weekend.*
 - [x] Request creation, tier filtering, request_targets
 - [x] The Book query — listBook, scoped to clubs the viewer is
       confirmed at, discretion-mode masking, keyset-cursor pagination
-- [ ] Offer flow and full state machine
-- [ ] Mutual confirmation → ledger write
+- [x] Offer flow and full state machine
+- [x] Mutual confirmation → ledger write
 - [x] Request expiry job
 - [ ] Playwright: request → offer → accept → confirm → ledger entry →
       balance moves
@@ -703,10 +704,15 @@ With a two-person team this is the difference between a codebase you can
 still reason about at M9 and one you can't — and it makes replay
 possible when something fails silently.
 
-Events to emit from the start:
-`round.confirmed` · `offer.accepted` · `offer.declined` ·
-`request.expired` · `application.approved` · `feedback.released` ·
-`membership.lapsed`
+Events emitted as of M4b (src/lib/requests.ts, src/lib/offers.ts,
+src/lib/ledger.ts): `request.created` · `request.withdrawn` ·
+`request.filled` · `request.expired` · `offer.made` · `offer.withdrawn`
+· `offer.rejected` · `offer.accepted` · `round.created` ·
+`round.confirmed` · `round.settled` · `round.cancelled` ·
+`round.reversed`. Named `offer.rejected`, not `offer.declined` as
+originally planned here — the requester declining a specific offer,
+distinct from a request lapsing unfilled. Still to come:
+`application.approved` · `feedback.released` · `membership.lapsed`.
 
 ### Availability inverts the pull
 
@@ -824,6 +830,58 @@ February, then the Club View (P5) maintains it.*
 ## Decision Log
 > Dated, with reasons. Prevents re-litigating.
 
+**2026-07-31 — Hosting is never gated on standing.** createRequest
+checks standing (src/lib/requests.ts); makeOffer deliberately does not
+(src/lib/offers.ts). A member deep in debit should be encouraged to
+host — that's how his balance recovers — not locked out of the one
+action that fixes it. Asymmetric on purpose; don't "fix" it into
+symmetry with createRequest.
+
+**2026-07-31 — One accepted offer does not fill a request.** A request
+is trip-shaped and may name several clubs, so a member may accept
+several offers against one request — request.state stays 'open' through
+acceptOffer. The requester closes it explicitly via fillRequest, or
+expireRequests closes it for him (as 'filled', see below) once at least
+one offer was accepted.
+
+**2026-07-31 — expireRequests fills instead of expiring when an offer
+was accepted.** A request whose window lapses after a host and guest
+already committed to a round did its job; marking it 'expired' would
+misrepresent it in the Access Index as unfilled demand. Checked via
+offers.state = 'accepted', not "has any offer" — an offer that was
+merely made and later withdrawn or declined still expires normally.
+Emits request.filled (payload.viaExpiry: true) rather than
+request.expired.
+
+**2026-07-31 — A cancelled round's played_on date is read back via a
+SQL ::date cast, not a JS Date's UTC getters.** offers.tee_at_local is
+"timestamp without time zone" — Postgres stores the literal wall-clock
+digits with no offset. Deriving round.played_on from a JS Date object
+built from that column risks a date shift near midnight depending on
+the server process's system timezone (date-time strings without an
+offset parse as local time in JS, but postgres-js formats Date values
+for a non-tz column using UTC getters). `select tee_at_local::date`
+sidesteps the round-trip entirely and reads back exactly what's stored.
+
+**2026-07-31 — rounds.cancelledAt is distinct from reversedAt.**
+cancelRound can fire before or after settlement — offers.ts calls
+reverseRound (setting reversedAt) only if settledAt was already set when
+cancellation happens; either way cancelledAt/cancelReason record that
+this round was cancelled and why. A round can therefore be reversed
+without being cancelled (a correction) or cancelled without ever having
+been reversed (cancelled pre-settlement) — the two timestamps answer
+different questions and neither implies the other.
+
+**2026-07-31 — The live-offer-per-host constraint is a partial unique
+index, not a plain one.** offers_request_id_host_id_live_unique
+(migration 0015) covers (request_id, host_id) only where state is not
+in ('withdrawn','declined','expired','cancelled') — a host may re-offer
+on the same request after withdrawing or being declined, so only one
+row may be live at a time, not one ever. Backs makeOffer's
+DUPLICATE_LIVE_OFFER application check as a real DB constraint, per
+CLAUDE.md's "database constraints enforce invariants, not application
+code."
+
 **2026-07-30 — RLS test fixtures use permanent fixed identities.**
 ledger_entries is append-only, so any fixture that touches the ledger
 can never be deleted. Rather than accumulate orphans every run, the
@@ -932,6 +990,43 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-31 — M4b complete (offer lifecycle and mutual confirmation).**
+Offer service (src/lib/offers.ts): makeOffer, withdrawOffer,
+rejectOffer, acceptOffer, fillRequest, confirmRound, cancelRound — no
+UI, no routes. An OfferError class with a discriminated code covers
+every precondition (REQUEST_NOT_OPEN, OWN_REQUEST,
+NO_CONFIRMED_MEMBERSHIP, COURSE_CLUB_MISMATCH, CLUB_NOT_TARGETED,
+DUPLICATE_LIVE_OFFER, NOT_HOST, NOT_OFFERED, NOT_OWNER, NOT_PARTICIPANT,
+ROUND_IN_FUTURE, ROUND_CANCELLED, and the not-found variants).
+makeOffer deliberately skips the standing check createRequest has —
+decision above. acceptOffer is where thread creation lives, per the
+domain rule that a thread may only come from an accepted offer, an
+itinerary, or a fixture: it builds the round, round_participants (host,
+requester, and one row per plus-one with invited_by set), the thread,
+and thread_members for the host and requester only — plus-ones get no
+thread access. confirmRound sets host_confirmed_at or guest_confirmed_at
+per side, refuses a round whose played_on is still in the future, and
+calls ledger.ts's settleRound in the same transaction once both sides
+are in; idempotent per side, matching settleRound's own idempotency.
+cancelRound is the decided path from the M3 decision log: reverses via
+ledger.ts's reverseRound if the round was already settled, otherwise
+touches no ledger row at all, and marks the round terminal
+(cancelled_at/cancel_reason, migration 0015) so it can never be
+confirmed or re-settled afterward — offers.ts enforces this by checking
+cancelled_at before confirmRound does anything else. expireRequests
+(src/lib/requests.ts) now closes a request as 'filled' rather than
+'expired' when it has an accepted offer, so a committed round isn't
+misrepresented as unfilled demand in the Access Index; ExpireRequestsResult
+gained a filledCount field alongside expiredCount/unfilledCount.
+Migration 0015 also adds a partial unique index
+(offers_request_id_host_id_live_unique) backing the "one live offer per
+host per request" rule as a real constraint, not just an application
+check. Tests (tests/offers/) use the same rollback-transaction pattern
+as tests/requests — including the confirm/settle and cancel/reverse
+paths, since ROLLBACK is transaction control and never trips the
+ledger's append-only trigger. 160 passing, 0 skipped across the full
+suite.
 
 **2026-07-30 — M4a complete (request creation and the Book query).**
 Request service (src/lib/requests.ts): createRequest, withdrawRequest,

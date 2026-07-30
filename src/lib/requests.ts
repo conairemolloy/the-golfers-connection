@@ -175,14 +175,18 @@ export async function withdrawRequest(tx: Tx, userId: string, requestId: string)
 
 export interface ExpireRequestsResult {
   expiredCount: number;
+  filledCount: number;
   unfilledCount: number;
 }
 
 /**
- * Every open request past expires_at -> 'expired'. The payload on each
- * request.expired event is the point of this function, not the state
- * change itself: unfilled requests are the Access Index and the
- * evidence for club-side release.
+ * Every open request past expires_at -> 'expired', EXCEPT a request
+ * with at least one accepted offer, which becomes 'filled' instead — a
+ * host and guest already committed to a round, so the request did its
+ * job even though the requester never called fillRequest themselves.
+ * The payload on each request.expired event is the point of that branch,
+ * not the state change itself: unfilled requests are the Access Index
+ * and the evidence for club-side release.
  */
 export async function expireRequests(tx: Tx): Promise<ExpireRequestsResult> {
   const now = new Date();
@@ -191,15 +195,31 @@ export async function expireRequests(tx: Tx): Promise<ExpireRequestsResult> {
     .from(requests)
     .where(and(eq(requests.state, "open"), lt(requests.expiresAt, now)));
 
+  let expiredCount = 0;
+  let filledCount = 0;
   let unfilledCount = 0;
 
   for (const request of candidates) {
     const [offerRows, targetRows] = await Promise.all([
-      tx.select({ id: offers.id }).from(offers).where(eq(offers.requestId, request.id)),
+      tx.select({ id: offers.id, state: offers.state }).from(offers).where(eq(offers.requestId, request.id)),
       tx.select({ clubId: requestTargets.clubId }).from(requestTargets).where(eq(requestTargets.requestId, request.id)),
     ]);
+
+    if (offerRows.some((o) => o.state === "accepted")) {
+      filledCount++;
+      await tx.update(requests).set({ state: "filled" }).where(eq(requests.id, request.id));
+      await tx.insert(domainEvents).values({
+        kind: "request.filled",
+        entity: "request",
+        entityId: request.id,
+        payload: { requestId: request.id, viaExpiry: true },
+      });
+      continue;
+    }
+
     const unfilled = offerRows.length === 0;
     if (unfilled) unfilledCount++;
+    expiredCount++;
 
     await tx.update(requests).set({ state: "expired" }).where(eq(requests.id, request.id));
 
@@ -215,7 +235,7 @@ export async function expireRequests(tx: Tx): Promise<ExpireRequestsResult> {
     });
   }
 
-  return { expiredCount: candidates.length, unfilledCount };
+  return { expiredCount, filledCount, unfilledCount };
 }
 
 // --- shared read-model helpers -------------------------------------------

@@ -37,6 +37,9 @@ ROADMAP.md in the project root is the source of truth for project state, phases 
 - Ledger entries are written on mutual confirmation only, never on offer acceptance.
 - A club is not a course; rounds reference `club_courses`.
 - Tee times store local time plus timezone, never UTC alone.
+- Hosting is never gated on standing; requesting is. `createRequest` checks standing, `makeOffer` deliberately does not — a member deep in debit should be encouraged to host, not blocked from the one action that fixes his balance. Do not add a standing check to `makeOffer` for symmetry with `createRequest`.
+- One accepted offer does not fill a request. A request may name several clubs and accept several offers; the requester (or the expiry job, if an offer was accepted) closes it explicitly to `'filled'`.
+- A cancelled round is terminal: never re-confirmed, never re-settled. If it happens after all, it's a new round.
 
 ## Raw SQL objects (not tracked by Drizzle)
 

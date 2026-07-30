@@ -443,6 +443,15 @@ export const offers = pgTable(
     index("offers_club_id_idx").on(table.clubId),
     index("offers_course_id_idx").on(table.courseId),
     index("offers_request_id_state_idx").on(table.requestId, table.state),
+    // Backs makeOffer's "host has no existing non-terminal offer on this
+    // request" precondition (src/lib/offers.ts) as a real DB constraint,
+    // not just an application check — a partial unique index rather than
+    // a plain one because a host may re-offer after withdrawing/being
+    // declined/cancelled, so only one row per (request, host) may be
+    // live at a time, not one ever.
+    uniqueIndex("offers_request_id_host_id_live_unique")
+      .on(table.requestId, table.hostId)
+      .where(sql`${table.state} not in ('withdrawn', 'declined', 'expired', 'cancelled')`),
   ],
 );
 
@@ -512,6 +521,12 @@ export const rounds = pgTable(
     // A reversed round is terminal: never re-settled. If the round happens
     // after all, it's a new round, not a re-confirmation of this one.
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    // A cancelled round is also terminal — never confirmed or re-settled.
+    // Distinct from reversedAt: cancellation can happen before or after
+    // settlement (offers.ts's cancelRound only calls reverseRound, and
+    // therefore only sets reversedAt, if settledAt was already set).
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
     // Copied from club_content at confirmation, so a round from 2027 keeps
     // showing what was true in 2027 even if club_content changes later.
     snapshotDressOnCourse: text("snapshot_dress_on_course"),
