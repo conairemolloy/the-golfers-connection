@@ -1,0 +1,2 @@
+ALTER TABLE "requests" ADD COLUMN "created_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
+CREATE INDEX "requests_created_at_id_idx" ON "requests" USING btree ("created_at","id");

@@ -41,7 +41,7 @@ ROADMAP.md in the project root is the source of truth for project state, phases 
 ## Raw SQL objects (not tracked by Drizzle)
 
 These objects were created by hand in raw SQL migrations (0003, 0004,
-0006, 0007, 0008, 0010) and do not appear in `schema.ts` or any
+0006, 0007, 0008, 0010, 0013) and do not appear in `schema.ts` or any
 drizzle-kit snapshot:
 
 - trigger `ledger_entries_no_update_or_delete` + function
@@ -62,6 +62,15 @@ drizzle-kit snapshot:
   policy that queries its own table inside EXISTS recurses (42P17);
   routing the check through a SECURITY DEFINER function bypasses RLS
   for the inner lookup instead of re-entering the policy.
+  `private.my_tier(uuid)` (0013) is the parameterised sibling of
+  `private.my_tier()` — the zero-arg form still exists (0007's
+  request_targets_insert_own_request_within_tier policy calls it) but is
+  now just `select private.my_tier(auth.uid())`; the one-arg form is the
+  actual formula, called with an explicit user id by
+  src/lib/requests.ts's tier check. CREATE OR REPLACE cannot turn a
+  zero-arg function into this one — different argument lists are
+  different overloads to Postgres — which is why both exist rather than
+  one function with a default.
 - constraint `profiles_member_needs_name_check` (0006) — display_name
   and initials may be null pre-membership, never once status = 'member'
 - function `public.handle_new_user()` + trigger `on_auth_user_created`

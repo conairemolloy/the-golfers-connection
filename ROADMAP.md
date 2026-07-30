@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 30 July 2026 (M3 complete — ledger service)*
+*Last updated: 30 July 2026 (M4a complete — request creation and the Book query)*
 
 ---
 
@@ -24,7 +24,8 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M4 — the Book.
+**Now working on.** M4 — the Book. Request creation and the Book query
+are done; the offer flow and mutual confirmation remain.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -202,17 +203,19 @@ round_participants. Test every one.*
 a weekend.*
 
 ## M4 — The Book
-- [ ] Request creation, tier filtering, request_targets
+- [x] Request creation, tier filtering, request_targets
+- [x] The Book query — listBook, scoped to clubs the viewer is
+      confirmed at, discretion-mode masking, keyset-cursor pagination
 - [ ] Offer flow and full state machine
 - [ ] Mutual confirmation → ledger write
-- [ ] Request expiry job
+- [x] Request expiry job
 - [ ] Playwright: request → offer → accept → confirm → ledger entry →
       balance moves
 - [ ] Host availability matching — a host declares a window once,
       matching runs automatically, he's nudged only on a fit
 - [ ] Graceful decline — one tap: not this time / try me in September /
       ask Jim at Castlerock instead
-- [ ] Unfilled request capture — expired-with-no-offer rows retained
+- [x] Unfilled request capture — expired-with-no-offer rows retained
       and queryable, never discarded
 
 ## M5 — Correspondence
@@ -450,6 +453,30 @@ before renewal. The app should visibly change in the off-season:
   `if (!alreadyDone && rand() < 0.3)` skips the draw when the first
   condition is false, shifting the whole sequence and making a "seeded,
   reproducible" test drift between runs. Draw first, then decide.
+- **The append-only trigger can be disabled by a superuser.** ALTER
+  TABLE ... DISABLE TRIGGER is a legitimate one-time DBA operation but
+  must never appear in a code path. Ledger immutability protects against
+  application bugs and API access, not against the service role.
+- **A keyset cursor on a timestamptz column needs capped precision.**
+  Postgres stores microseconds; a JS Date round-trips at millisecond
+  precision. Send a truncated cursor value back for an exact-equality
+  tiebreak and it silently matches nothing — every page past the first
+  comes back empty. `timestamp(3)` on any column used as a cursor.
+- **CREATE OR REPLACE can't add a parameter to a zero-arg function.**
+  Different argument lists are different overloads to Postgres, not a
+  replacement — the old zero-arg version keeps running its old body
+  untouched. To parameterise an existing RLS-helper-style function
+  without duplicating its formula, make the new signature the source of
+  truth and have the old one delegate to it in one line.
+- **A batch job that scans a whole table will see other suites'
+  fixtures.** expireRequests has no reason to scope itself to "just this
+  test's rows" — that's the point of a batch job — so a test asserting
+  an exact global count breaks the moment another suite's ephemeral
+  fixtures are sitting in the same shared dev database. Assert on the
+  specific rows under test, not the aggregate count.
+- **Never grep compiler or test output to make it look clean.** A filter
+  that hides line one of a multi-line error leaves line two orphaned and
+  the summary reading "no errors". Suppress at source or fix it.
 
 ---
 
@@ -905,6 +932,26 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-30 — M4a complete (request creation and the Book query).**
+Request service (src/lib/requests.ts): createRequest, withdrawRequest,
+expireRequests, listBook, myRequests — no UI, no routes, no offers yet.
+Zod validates at the boundary (dates, party size, target club count);
+a RequestError class with a discriminated code covers the rest
+(STANDING_CLOSED via ledger.ts's standing(), NO_CONFIRMED_MEMBERSHIP,
+CLUB_TIER_TOO_HIGH, NOT_OWNER, REQUEST_NOT_FOUND). The tier check
+reuses private.my_tier(uuid) rather than re-deriving the RLS policy's
+comparison — that function only ever took auth.uid() implicitly before
+this, so it's now parameterised (migration 0013), with the old zero-arg
+form reduced to a one-line delegation so there's one formula, not two.
+listBook's keyset cursor uncovered a real bug: Postgres's microsecond
+timestamptz precision doesn't round-trip through a JS Date parameter,
+so an exact-equality tiebreak silently matched nothing past page one —
+fixed by capping requests.created_at to millisecond precision
+(migration 0014). Tests (tests/requests/) use the rollback-transaction
+pattern throughout, same as the ledger property test: nothing here
+writes to ledger_entries, so nothing needs to survive. 139 passing,
+0 skipped across the full suite.
 
 **2026-07-30 — M3 complete.** Ledger service (src/lib/ledger.ts):
 settleRound, reverseRound, memberBalance, standing, all transaction-

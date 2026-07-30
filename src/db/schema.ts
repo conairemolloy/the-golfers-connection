@@ -382,10 +382,21 @@ export const requests = pgTable(
     state: requestState("state").notNull().default("open"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     pacePreference: pacePreference("pace_preference"),
+    // Precision capped at milliseconds, matching JS Date — this column
+    // is a keyset pagination cursor (listBook in src/lib/requests.ts),
+    // and Postgres's default microsecond precision doesn't round-trip
+    // through a JS Date parameter: the cursor value sent back to
+    // Postgres silently truncates to milliseconds, so an exact-equality
+    // tiebreak against the untruncated stored value never matches and
+    // every page past the first comes back empty.
+    createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     index("requests_user_id_idx").on(table.userId),
     index("requests_state_date_from_idx").on(table.state, table.dateFrom),
+    index("requests_created_at_id_idx").on(table.createdAt, table.id),
   ],
 );
 
