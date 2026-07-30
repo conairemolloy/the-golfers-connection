@@ -8,8 +8,10 @@ import { z } from "zod";
 import {
   clubCourses,
   domainEvents,
+  hostDeclines,
   memberships,
   offers,
+  profiles,
   requestTargets,
   requests,
   roundParticipants,
@@ -26,7 +28,7 @@ export type { Tx };
 // having a round cancelled — only one row per (request, host) may be
 // live at a time, not one ever. Kept in sync with the partial unique
 // index offers_request_id_host_id_live_unique (migration 0015).
-const TERMINAL_OFFER_STATES = ["withdrawn", "declined", "expired", "cancelled"] as const;
+export const TERMINAL_OFFER_STATES = ["withdrawn", "declined", "expired", "cancelled"] as const;
 
 export type OfferErrorCode =
   | "VALIDATION_FAILED"
@@ -44,7 +46,9 @@ export type OfferErrorCode =
   | "ROUND_NOT_FOUND"
   | "NOT_PARTICIPANT"
   | "ROUND_IN_FUTURE"
-  | "ROUND_CANCELLED";
+  | "ROUND_CANCELLED"
+  | "HAS_LIVE_OFFER"
+  | "SUGGESTED_MEMBER_NOT_FOUND";
 
 export class OfferError extends Error {
   readonly code: OfferErrorCode;
@@ -67,6 +71,8 @@ function todayIso(): string {
 const localDateTime = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/, "must be a local date-time with no offset, e.g. 2026-08-05T09:00");
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be a YYYY-MM-DD date");
 
 export const makeOfferInputSchema = z.object({
   clubId: z.string().uuid(),
@@ -481,4 +487,104 @@ export async function cancelRound(
   });
 
   return { status: "cancelled" };
+}
+
+export const declineToHostInputSchema = z
+  .object({
+    reason: z.enum(["not_this_time", "dates_dont_suit", "club_too_busy", "other"]),
+    note: z.string().optional(),
+    suggestedDateFrom: isoDate.optional(),
+    suggestedDateTo: isoDate.optional(),
+    suggestedMemberId: z.string().uuid().optional(),
+  })
+  .refine((v) => !(v.suggestedDateFrom && v.suggestedDateTo) || v.suggestedDateTo >= v.suggestedDateFrom, {
+    message: "suggestedDateTo must be on or after suggestedDateFrom",
+    path: ["suggestedDateTo"],
+  });
+
+export type DeclineToHostInput = z.input<typeof declineToHostInputSchema>;
+
+export type DeclineToHostResult = { status: "declined"; declineId: string } | { status: "already_declined" };
+
+/**
+ * A host saying no to a request he has NOT offered on — distinct from
+ * rejectOffer, which is the requester turning down an existing offer.
+ * Records the decline so matchRequestToAvailability (src/lib/
+ * availability.ts) stops surfacing this request to this host. Idempotent
+ * per (host, request), backed by host_declines_request_id_host_id_unique.
+ */
+export async function declineToHost(
+  tx: Tx,
+  hostId: string,
+  requestId: string,
+  input: DeclineToHostInput,
+): Promise<DeclineToHostResult> {
+  const parsed = declineToHostInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new OfferError("VALIDATION_FAILED", parsed.error.message, parsed.error.issues);
+  }
+  const data = parsed.data;
+
+  const [request] = await tx.select().from(requests).where(eq(requests.id, requestId));
+  if (!request) {
+    throw new OfferError("REQUEST_NOT_FOUND", `request ${requestId} does not exist`);
+  }
+
+  const [existingDecline] = await tx
+    .select({ id: hostDeclines.id })
+    .from(hostDeclines)
+    .where(and(eq(hostDeclines.requestId, requestId), eq(hostDeclines.hostId, hostId)));
+  if (existingDecline) {
+    return { status: "already_declined" };
+  }
+
+  const [liveOffer] = await tx
+    .select({ id: offers.id })
+    .from(offers)
+    .where(and(eq(offers.requestId, requestId), eq(offers.hostId, hostId), notInArray(offers.state, [...TERMINAL_OFFER_STATES])));
+  if (liveOffer) {
+    throw new OfferError(
+      "HAS_LIVE_OFFER",
+      `member ${hostId} already has a live offer on request ${requestId} — withdraw it instead of declining`,
+    );
+  }
+
+  if (data.suggestedMemberId) {
+    const [suggested] = await tx
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(and(eq(profiles.id, data.suggestedMemberId), eq(profiles.status, "member")));
+    if (!suggested) {
+      throw new OfferError("SUGGESTED_MEMBER_NOT_FOUND", `${data.suggestedMemberId} is not a member`);
+    }
+  }
+
+  const [decline] = await tx
+    .insert(hostDeclines)
+    .values({
+      requestId,
+      hostId,
+      reason: data.reason,
+      note: data.note,
+      suggestedDateFrom: data.suggestedDateFrom,
+      suggestedDateTo: data.suggestedDateTo,
+      suggestedMemberId: data.suggestedMemberId,
+    })
+    .returning();
+
+  await tx.insert(domainEvents).values({
+    kind: "request.declined_by_host",
+    entity: "request",
+    entityId: requestId,
+    payload: {
+      requestId,
+      hostId,
+      reason: data.reason,
+      suggestedDateFrom: data.suggestedDateFrom,
+      suggestedDateTo: data.suggestedDateTo,
+      suggestedMemberId: data.suggestedMemberId,
+    },
+  });
+
+  return { status: "declined", declineId: decline.id };
 }

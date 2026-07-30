@@ -123,6 +123,13 @@ export const pacePreference = pgEnum("pace_preference", [
   "no_preference",
 ]);
 
+export const hostDeclineReason = pgEnum("host_decline_reason", [
+  "not_this_time",
+  "dates_dont_suit",
+  "club_too_busy",
+  "other",
+]);
+
 // --- clubs -----------------------------------------------------------------
 
 export const clubs = pgTable(
@@ -495,6 +502,35 @@ export const hostAvailability = pgTable(
       "host_availability_date_range_check",
       sql`${table.dateFrom} is null or ${table.dateTo} is null or ${table.dateTo} >= ${table.dateFrom}`,
     ),
+  ],
+);
+
+// A host declining a request he has NOT offered on — distinct from
+// offers.state = 'declined', which is the requester turning down an
+// existing offer. Records the no so matchRequestToAvailability stops
+// surfacing this request to this host again.
+export const hostDeclines = pgTable(
+  "host_declines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => requests.id),
+    hostId: uuid("host_id")
+      .notNull()
+      .references(() => profiles.id),
+    reason: hostDeclineReason("reason").notNull(),
+    note: text("note"),
+    suggestedDateFrom: date("suggested_date_from"),
+    suggestedDateTo: date("suggested_date_to"),
+    suggestedMemberId: uuid("suggested_member_id").references(() => profiles.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("host_declines_request_id_host_id_unique").on(table.requestId, table.hostId),
+    index("host_declines_host_id_idx").on(table.hostId),
   ],
 );
 

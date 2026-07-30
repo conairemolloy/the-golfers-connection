@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 31 July 2026 (M4b complete — offer lifecycle and mutual confirmation)*
+*Last updated: 31 July 2026 (M4c complete — host availability matching and graceful decline)*
 
 ---
 
@@ -24,9 +24,13 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M4 — the Book. Request creation, the Book query, and
-the offer flow with mutual confirmation are done; host availability
-matching and graceful decline are M4c and remain.
+**Now working on.** M4's service layer is done — request creation, the
+Book query, the offer flow with mutual confirmation, host availability
+matching and graceful decline. The Playwright journey test (request →
+offer → accept → confirm → ledger entry → balance moves) is still
+outstanding: it needs UI/routes to drive, which M4 deliberately built
+none of. Pick it up alongside M5, or whenever the first route lands.
+Next up is M5 — Correspondence.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -212,9 +216,9 @@ a weekend.*
 - [x] Request expiry job
 - [ ] Playwright: request → offer → accept → confirm → ledger entry →
       balance moves
-- [ ] Host availability matching — a host declares a window once,
+- [x] Host availability matching — a host declares a window once,
       matching runs automatically, he's nudged only on a fit
-- [ ] Graceful decline — one tap: not this time / try me in September /
+- [x] Graceful decline — one tap: not this time / try me in September /
       ask Jim at Castlerock instead
 - [x] Unfilled request capture — expired-with-no-offer rows retained
       and queryable, never discarded
@@ -478,6 +482,11 @@ before renewal. The app should visibly change in the off-season:
 - **Never grep compiler or test output to make it look clean.** A filter
   that hides line one of a multi-line error leaves line two orphaned and
   the summary reading "no errors". Suppress at source or fix it.
+- **A new test directory silently doesn't run.** vitest.config.ts has an
+  explicit include list; a suite missing from it reports zero tests, not
+  an error, and the summary just looks smaller. Caught this on
+  tests/availability — 26 tests invisible. Check the file count in the
+  summary, not just the pass count.
 
 ---
 
@@ -673,6 +682,7 @@ they describe.
 | `audit_log` | Every admin action |
 | `domain_events` | Emitted events, processed separately. Replayable |
 | `host_availability` | A host's declared windows — weekday, capacity, min tier |
+| `host_declines` | A host's one-tap no on a request he never offered on, with an optional redirect |
 | `feature_flags` | Per-key, optionally scoped |
 
 ---
@@ -704,15 +714,18 @@ With a two-person team this is the difference between a codebase you can
 still reason about at M9 and one you can't — and it makes replay
 possible when something fails silently.
 
-Events emitted as of M4b (src/lib/requests.ts, src/lib/offers.ts,
-src/lib/ledger.ts): `request.created` · `request.withdrawn` ·
-`request.filled` · `request.expired` · `offer.made` · `offer.withdrawn`
-· `offer.rejected` · `offer.accepted` · `round.created` ·
+Events emitted as of M4c (src/lib/requests.ts, src/lib/offers.ts,
+src/lib/ledger.ts, src/lib/availability.ts): `request.created` ·
+`request.withdrawn` · `request.filled` · `request.expired` ·
+`request.declined_by_host` · `offer.made` · `offer.withdrawn` ·
+`offer.rejected` · `offer.accepted` · `round.created` ·
 `round.confirmed` · `round.settled` · `round.cancelled` ·
-`round.reversed`. Named `offer.rejected`, not `offer.declined` as
-originally planned here — the requester declining a specific offer,
-distinct from a request lapsing unfilled. Still to come:
-`application.approved` · `feedback.released` · `membership.lapsed`.
+`round.reversed` · `availability.declared`. Named `offer.rejected`, not
+`offer.declined` as originally planned here — the requester declining a
+specific offer, distinct from a request lapsing unfilled, and distinct
+again from `request.declined_by_host`, which is a host declining a
+request he never offered on. Still to come: `application.approved` ·
+`feedback.released` · `membership.lapsed`.
 
 ### Availability inverts the pull
 
@@ -829,6 +842,47 @@ February, then the Club View (P5) maintains it.*
 
 ## Decision Log
 > Dated, with reasons. Prevents re-litigating.
+
+**2026-07-31 — A window's min_tier is a floor read in the opposite
+direction from the club-tier check.** request_targets' RLS policy and
+requests.ts's tier check both use `club.tier >= my_tier` — "I may
+request into my tier or a worse one." host_availability.min_tier is the
+opposite shape: a host declaring `min_tier: 2` wants only his tier or
+better, so matchRequestToAvailability and matchAvailabilityToRequests
+(src/lib/availability.ts) test `requesterTier <= minTier`, not `>=`.
+Both read the same in prose ("at or above the standard") because lower
+tier numbers are more prestigious; the comparator flips because one
+question is "is this club worthy of me" and the other is "is this
+requester worthy of my window." Documented in availability.ts's
+tierAllows so the asymmetry isn't mistaken for a bug and "fixed" into
+matching the request_targets direction.
+
+**2026-07-31 — matchRequestToAvailability and matchAvailabilityToRequests
+are read-only by design.** Neither creates an offer — a host still has
+to choose to make one. The comment in availability.ts says so explicitly
+because the whole point of automatic matching (see "Availability inverts
+the pull" above) is surfacing the request to the right host, never
+committing him. A future UI that auto-drafts an offer from a match would
+be building past this deliberately.
+
+**2026-07-31 — declineToHost and matchRequestToAvailability share one
+exclusion vocabulary: a live offer or a decline row.** Both read
+TERMINAL_OFFER_STATES from offers.ts rather than each service keeping
+its own list of "not really live" offer states — the two exclusions
+(host already offered, host already declined) are the same rule
+`matchRequestToAvailability` enforces to decide who gets surfaced, so
+declineToHost's "a host with a live offer must withdraw, not decline"
+check (HAS_LIVE_OFFER) uses the identical state list.
+
+**2026-07-31 — A weekday window's matching dates are computed with an
+ISO-0-is-Monday formula, independently re-derived in the test harness.**
+host_availability.weekday is documented as "0-6, ISO (0 = Monday)", which
+doesn't match JS's native Date.getUTCDay() (0 = Sunday). availability.ts
+converts via `(jsDay + 6) % 7`; tests/availability/harness.ts's
+isoWeekdayOf reimplements the same formula independently (checked against
+Python's `date.isoweekday() - 1` while writing it) rather than importing
+availability.ts's version, so the weekday-window test isn't just checking
+the implementation against itself.
 
 **2026-07-31 — Hosting is never gated on standing.** createRequest
 checks standing (src/lib/requests.ts); makeOffer deliberately does not
@@ -990,6 +1044,39 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-31 — M4c complete (host availability matching and graceful
+decline). M4's service layer is done.** New service (src/lib/
+availability.ts): declareAvailability, updateAvailability,
+deactivateAvailability, matchRequestToAvailability,
+matchAvailabilityToRequests — no UI, no routes. An AvailabilityError
+class covers VALIDATION_FAILED (including the readable Zod message for
+"neither weekday nor a bounded range" rather than a raw 23514 from the
+host_availability_window_check constraint), NO_CONFIRMED_MEMBERSHIP,
+COURSE_CLUB_MISMATCH, AVAILABILITY_NOT_FOUND, NOT_OWNER and
+REQUEST_NOT_FOUND. Both match functions are read-only by design (decision
+above) and share exclusion logic — no live offer, no decline row, not the
+requester's own window, capacity, min_tier, window overlap — reusing
+TERMINAL_OFFER_STATES exported from offers.ts rather than redefining it.
+offers.ts gained declineToHost: a host's one-tap no on a request he
+never offered on, distinct from rejectOffer (the requester turning down
+an offer that exists). Idempotent per (host, request) via
+host_declines_request_id_host_id_unique; refuses a host with a live offer
+(HAS_LIVE_OFFER — he should withdraw instead) and a suggested member who
+isn't a real member (SUGGESTED_MEMBER_NOT_FOUND). Emits
+`request.declined_by_host` with the reason and any redirect.
+Migration 0016 adds host_declines (schema-tracked via schema.ts,
+drizzle-kit generate) plus its RLS by hand in the same file, following
+CLAUDE.md's convention for hand-managed policies: SELECT for the
+declining host or the request owner, INSERT for the host only. Tests
+(tests/availability/, added to vitest.config.ts's include list — a new
+test directory doesn't run until it's listed there) use the same
+rollback-transaction pattern as tests/offers and tests/requests, plus an
+independently re-derived ISO-weekday formula in the harness (decision
+above) so the weekday-matching test isn't circular. 188 passing, 0
+skipped across the full suite. The M4 Playwright journey test remains
+open — noted at the top of this file, not swept under this entry — since
+it needs UI/routes that M4 deliberately built none of.
 
 **2026-07-31 — M4b complete (offer lifecycle and mutual confirmation).**
 Offer service (src/lib/offers.ts): makeOffer, withdrawOffer,
