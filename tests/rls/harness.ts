@@ -242,7 +242,7 @@ async function findOrCreateAvailability(userId: string, clubId: string, note: st
   return row;
 }
 
-async function findOrCreatePlusOne(roundId: string, guestName: string) {
+async function findOrCreatePlusOne(roundId: string, guestName: string, invitedBy: string) {
   const existing = await db
     .select()
     .from(schema.roundParticipants)
@@ -255,7 +255,7 @@ async function findOrCreatePlusOne(roundId: string, guestName: string) {
   if (existing.length > 0) return existing[0];
   const [row] = await db
     .insert(schema.roundParticipants)
-    .values({ roundId, userId: null, guestName, isMember: false, role: "guest" })
+    .values({ roundId, userId: null, guestName, isMember: false, invitedBy, role: "guest" })
     .returning();
   return row;
 }
@@ -444,7 +444,7 @@ async function buildFixedFixtures(admin: SupabaseClient): Promise<FixedFixtures>
     .onConflictDoNothing();
 
   const availabilityB = await findOrCreateAvailability(memberBId, club1.id, FIXED_AVAILABILITY_NOTE);
-  const plusOne = await findOrCreatePlusOne(roundId, FIXED_PLUS_ONE_GUEST_NAME);
+  const plusOne = await findOrCreatePlusOne(roundId, FIXED_PLUS_ONE_GUEST_NAME, memberBId);
 
   return {
     club1Id: club1.id,

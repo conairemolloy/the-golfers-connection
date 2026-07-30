@@ -498,6 +498,9 @@ export const rounds = pgTable(
     hostConfirmedAt: timestamp("host_confirmed_at", { withTimezone: true }),
     guestConfirmedAt: timestamp("guest_confirmed_at", { withTimezone: true }),
     settledAt: timestamp("settled_at", { withTimezone: true }),
+    // A reversed round is terminal: never re-settled. If the round happens
+    // after all, it's a new round, not a re-confirmation of this one.
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
     // Copied from club_content at confirmation, so a round from 2027 keeps
     // showing what was true in 2027 even if club_content changes later.
     snapshotDressOnCourse: text("snapshot_dress_on_course"),
@@ -525,13 +528,20 @@ export const roundParticipants = pgTable(
     userId: uuid("user_id").references(() => profiles.id),
     // A plus-one is a non-member brought by a member. Exactly one of
     // userId / guestName is set. The inviting member carries the debit for
-    // his guest — enforced in application code at M3, not here.
+    // his guest — enforced by the ledger service at M3, not here.
     guestName: text("guest_name"),
     isMember: boolean("is_member").notNull().default(true),
+    // A plus-one is always attributable to the member who brought him,
+    // because that member carries his debit.
+    invitedBy: uuid("invited_by").references(() => profiles.id),
     role: roundParticipantRole("role").notNull(),
   },
   (table) => [
     index("round_participants_user_id_idx").on(table.userId),
+    index("round_participants_round_id_invited_by_idx").on(
+      table.roundId,
+      table.invitedBy,
+    ),
     uniqueIndex("round_participants_round_id_user_id_unique")
       .on(table.roundId, table.userId)
       .where(sql`${table.userId} is not null`),
@@ -539,6 +549,11 @@ export const roundParticipants = pgTable(
       "round_participants_membership_check",
       sql`(${table.isMember} and ${table.userId} is not null and ${table.guestName} is null)
         or (not ${table.isMember} and ${table.userId} is null and ${table.guestName} is not null)`,
+    ),
+    check(
+      "round_participants_invited_by_check",
+      sql`(${table.isMember} and ${table.invitedBy} is null)
+        or (not ${table.isMember} and ${table.invitedBy} is not null)`,
     ),
   ],
 );

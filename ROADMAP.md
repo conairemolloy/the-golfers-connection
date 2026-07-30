@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 30 July 2026 (M1 gap closed — Prompt F tables)*
+*Last updated: 30 July 2026 (M3 complete — ledger service)*
 
 ---
 
@@ -24,7 +24,7 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M3 — the ledger.
+**Now working on.** M4 — the Book.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -189,14 +189,14 @@ lines, running balance. Not a points bar.
 round_participants. Test every one.*
 
 ## M3 — The ledger
-- [ ] Entry writes, idempotency
-- [ ] Balance derivation, standing thresholds
-- [ ] Unit tests: double-write, out-of-order confirmation, corrections
-- [ ] Property test: balance always equals sum of entries
-- [ ] Parallel-request test for the confirm race
-- [ ] Cancellation reversal — compensating entry with a reason,
+- [x] Entry writes, idempotency
+- [x] Balance derivation, standing thresholds
+- [x] Unit tests: double-write, out-of-order confirmation, corrections
+- [x] Property test: balance always equals sum of entries
+- [x] Parallel-request test for the confirm race
+- [x] Cancellation reversal — compensating entry with a reason,
       never a delete. Decided path before it's needed in anger.
-- [ ] Plus-one rule: the member carries the debit for his guest too
+- [x] Plus-one rule: the member carries the debit for his guest too
 
 *The only thing that must be perfect. Everything else is rebuildable in
 a weekend.*
@@ -468,7 +468,6 @@ while the network quietly fails.
 - [ ] Equity split and Nicholl's ongoing obligation once the network
       exists
 - [ ] Are tier rules hard blocks or soft warnings?
-- [ ] Does the ledger threshold lock requests or just flag them?
 - [ ] Founding membership price point
 
 ---
@@ -869,10 +868,48 @@ placeholder like 'Member', which would look like real data wherever it
 surfaced. A CHECK constraint enforces that both are present by the time
 status reaches 'member'.
 
+**2026-07-30 — The ledger threshold locks requests, via a grace band.**
+Balance >= 0 is 'good'. -1 or -2 is 'owing' but canRequest stays true —
+the grace band exists so a member hosted exactly once isn't immediately
+locked out over one unsettled round. Balance <= -3 is 'closed' and
+canRequest goes false: a hard lock, not a soft flag, because a flag a
+member can route around isn't governance, it's a suggestion. Standing is
+ledger-derived only for now; M7 folds in released feedback.
+
+**2026-07-30 — Plus-one amount: host is credited per head, the inviting
+member is debited per head.** Settling a round credits the host once for
+every guest who played, member or plus-one alike — he hosted four
+people, he's credited four. Each guest member is debited 1 for himself
+plus 1 for every plus-one attributed to him via
+round_participants.invited_by. A plus-one row generates no ledger entry
+of its own; it's already counted in its inviter's debit. This is the
+precise mechanics behind the 2026-07-29 "member carries both debits"
+decision — credits and debits always sum to the same total per round,
+so the reciprocity incentive can't be gamed by bringing a friend along.
+
 ---
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-30 — M3 complete.** Ledger service (src/lib/ledger.ts):
+settleRound, reverseRound, memberBalance, standing, all transaction-
+scoped, all server-side only. round_participants.invited_by added
+(migration 0011) so a plus-one's debit is attributable to the member who
+brought him; round_participants' SELECT policy needed no change since it
+was already rewritten (0008) to gate on round_id/is_admin, never on the
+row's own user_id. settleRound and reverseRound are idempotent by
+design — a repeat call, or the loser of a concurrent confirm race,
+resolves via a SELECT ... FOR UPDATE row lock to a no-op rather than an
+error or a duplicate; a reversed round is terminal and raises if
+re-settled. 128 passing, 0 skipped: unit tests for every amount
+scenario (plain, multi-guest, plus-one, multi-guest-with-plus-ones),
+settle-twice and reverse-twice no-ops, the reversed-cannot-resettle
+error, all six standing boundaries, a real two-connection concurrency
+race, and a seeded 100-iteration property test asserting
+memberBalance() always equals the raw sum of ledger_entries. Tests use
+the postgres connection directly, never RLS, matching how the ledger
+itself runs in production.
 
 **2026-07-30 — M2 complete.** Hostile-member RLS suite: 93 passing,
 1 skipped (domain_events, not yet created). Verified against a real

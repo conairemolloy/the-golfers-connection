@@ -78,6 +78,13 @@
       "when": 1785429951924,
       "tag": "0010_availability_domain_events_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785430960647,
+      "tag": "0011_safe_darkstar",
+      "breakpoints": true
     }
   ]
 }
