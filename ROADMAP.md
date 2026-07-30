@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 30 July 2026*
+*Last updated: 30 July 2026 (M2 complete)*
 
 ---
 
@@ -24,7 +24,7 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M2 — identity and RLS.
+**Now working on.** M1 gap — the Prompt F tables, then M3.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -183,8 +183,8 @@ lines, running balance. Not a points bar.
 ## M2 — Identity and RLS
 - [ ] Magic link auth, no passwords, 90-day sessions
 - [x] RLS policy on every table
-- [ ] hostile_member test fixture
-- [ ] Automated test: hostile member cannot read the directory, another
+- [x] hostile_member test fixture
+- [x] Automated test: hostile member cannot read the directory, another
       member's ledger, another member's threads, or any table by direct
       PostgREST call
 
@@ -439,6 +439,13 @@ before renewal. The app should visibly change in the off-season:
 - **New auth users have no profile row.** A trigger on auth.users
   provisions it. Without that, is_onboarding() is false and signup dies
   at step two.
+- **RLS policies that query their own table recurse.** An EXISTS
+  subquery against the same table re-enters the policy — Postgres
+  errors 42P17. Move the check into a SECURITY DEFINER helper in the
+  private schema. Hit this on round_participants and thread_members.
+- **A test that only checks `error !== null` treats a crash as a pass.**
+  Assert the error code. 42501 is a policy denial; 42P17 is a broken
+  policy, and reads as success to a naive check.
 
 ---
 
@@ -787,6 +794,15 @@ February, then the Club View (P5) maintains it.*
 ## Decision Log
 > Dated, with reasons. Prevents re-litigating.
 
+**2026-07-30 — RLS test fixtures use permanent fixed identities.**
+ledger_entries is append-only, so any fixture that touches the ledger
+can never be deleted. Rather than accumulate orphans every run, the
+ledger-linked chain (one member, one admin, two clubs, one round, two
+entries) is find-or-create on a stable key and stays permanently.
+Everything else uses a per-run prefix and is torn down. Fixture rows are
+named @rls-fixture.invalid and "ZZ RLS Fixture — " so they are
+unmistakable, and the seed script must exclude them.
+
 **2026-07-29 — Membership fee, never commission on green fees.**
 Taking a cut of a guest fee is brokering tee times. It's what gets a
 member hauled in front of his committee and the platform a
@@ -860,6 +876,17 @@ status reaches 'member'.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-30 — M2 complete.** Hostile-member RLS suite: 93 passing,
+1 skipped (domain_events, not yet created). Verified against a real
+authenticated session through supabase-js, not the postgres role.
+Covers anon reaching zero tables with the list derived at runtime,
+ledger isolation, member_balance authorisation, blind feedback release,
+thread and round membership, tier enforcement including the fail-closed
+unconfirmed case, applicant scope, and a coverage guard asserting every
+public table has RLS and no anon grants. Fixed 42P17 recursion on
+round_participants and thread_members via SECURITY DEFINER helpers
+(migration 0008).
 
 **2026-07-30 — M2a complete.** RLS applied across all 24 public tables,
 44 policies, anon granted nothing anywhere. Five private.* helper

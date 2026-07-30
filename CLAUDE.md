@@ -41,7 +41,7 @@ ROADMAP.md in the project root is the source of truth for project state, phases 
 ## Raw SQL objects (not tracked by Drizzle)
 
 These objects were created by hand in raw SQL migrations (0003, 0004,
-0006, 0007) and do not appear in `schema.ts` or any drizzle-kit
+0006, 0007, 0008) and do not appear in `schema.ts` or any drizzle-kit
 snapshot:
 
 - trigger `ledger_entries_no_update_or_delete` + function
@@ -56,16 +56,22 @@ snapshot:
 - table and constraint comments on `ledger_entries`
 - `private` schema helper functions: `private.current_member()`,
   `private.is_member()`, `private.is_onboarding()`, `private.is_admin()`,
-  `private.my_tier()` (0006) — never exposed to PostgREST, used only
-  inside policy expressions
+  `private.my_tier()` (0006), `private.is_round_participant(uuid)`,
+  `private.is_thread_member(uuid)` (0008) — never exposed to PostgREST,
+  used only inside policy expressions. The 0008 pair exists because a
+  policy that queries its own table inside EXISTS recurses (42P17);
+  routing the check through a SECURITY DEFINER function bypasses RLS
+  for the inner lookup instead of re-entering the policy.
 - constraint `profiles_member_needs_name_check` (0006) — display_name
   and initials may be null pre-membership, never once status = 'member'
 - function `public.handle_new_user()` + trigger `on_auth_user_created`
   on `auth.users` (0006) — provisions the profiles row at signup; the
   trigger lives on `auth.users`, outside the `public` schema, so it
   can't appear in a Drizzle snapshot regardless
-- every RLS policy on every table (0007), and the REVOKE/GRANT pair on
-  each table that backs it
+- every RLS policy on every table (0007; round_participants,
+  thread_members, rounds, threads, messages and feedback's INSERT
+  policy rewritten in 0008), and the REVOKE/GRANT pair on each table
+  that backs it
 
 `profiles.is_admin` is the one exception — it goes through `schema.ts`
 and drizzle-kit as normal (0005). `profiles.display_name` and
