@@ -24,6 +24,12 @@
 // The one exception: the "missing confirmation" scenario round is also
 // permanent (for consistency — one fixture lifecycle, not two) but is
 // deliberately never settled, so it never writes a ledger_entries row.
+//
+// property.test.ts is a second exception, in the other direction: it
+// runs its whole 100-iteration loop inside one transaction it rolls
+// back, via buildEphemeralRound below (not findOrCreateRound — there is
+// nothing to find-or-create when nothing survives the test). See that
+// file for why.
 
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -128,7 +134,7 @@ async function ensureMemberProfile(label: string): Promise<string> {
   return userId;
 }
 
-async function ensureClubAndCourse(): Promise<{ clubId: string; courseId: string }> {
+export async function ensureClubAndCourse(): Promise<{ clubId: string; courseId: string }> {
   const existingClub = await db.select().from(schema.clubs).where(eq(schema.clubs.name, FIXED_CLUB_NAME));
   const club =
     existingClub[0] ??
@@ -167,6 +173,34 @@ async function ensureClubAndCourse(): Promise<{ clubId: string; courseId: string
 export interface GuestSpec {
   userId: string;
   plusOnes?: number;
+}
+
+// Shared between findOrCreateRound (permanent, via `db`) and
+// buildEphemeralRound (rolled back, via a caller-supplied `tx`) — the row
+// shape is identical either way, only whether it survives differs.
+function buildParticipantRows(
+  roundId: string,
+  hostId: string,
+  guests: GuestSpec[],
+  guestNamePrefix: string,
+): (typeof schema.roundParticipants.$inferInsert)[] {
+  const rows: (typeof schema.roundParticipants.$inferInsert)[] = [
+    { roundId, userId: hostId, isMember: true, role: "host" },
+  ];
+  for (const guest of guests) {
+    rows.push({ roundId, userId: guest.userId, isMember: true, role: "guest" });
+    for (let i = 0; i < (guest.plusOnes ?? 0); i++) {
+      rows.push({
+        roundId,
+        userId: null,
+        guestName: `${guestNamePrefix} — plus-one ${i + 1} of ${guest.userId.slice(0, 8)}`,
+        isMember: false,
+        invitedBy: guest.userId,
+        role: "guest",
+      });
+    }
+  }
+  return rows;
 }
 
 export interface RoundSpec {
@@ -233,23 +267,66 @@ export async function findOrCreateRound(spec: RoundSpec): Promise<{ roundId: str
     })
     .returning();
 
-  const participantRows: (typeof schema.roundParticipants.$inferInsert)[] = [
-    { roundId: round.id, userId: spec.hostId, isMember: true, role: "host" },
-  ];
-  for (const guest of spec.guests) {
-    participantRows.push({ roundId: round.id, userId: guest.userId, isMember: true, role: "guest" });
-    for (let i = 0; i < (guest.plusOnes ?? 0); i++) {
-      participantRows.push({
-        roundId: round.id,
-        userId: null,
-        guestName: `${marker} — plus-one ${i + 1} of ${guest.userId.slice(0, 8)}`,
-        isMember: false,
-        invitedBy: guest.userId,
-        role: "guest",
-      });
-    }
-  }
+  const participantRows = buildParticipantRows(round.id, spec.hostId, spec.guests, marker);
   await db.insert(schema.roundParticipants).values(participantRows);
+
+  return { roundId: round.id };
+}
+
+export interface EphemeralRoundSpec {
+  hostId: string;
+  guests: GuestSpec[];
+  clubId: string;
+  courseId: string;
+}
+
+// For the property test only: builds a request/offer/round/participants
+// chain on the caller's transaction, with no existence check and no
+// stable marker — there is nothing to find-or-create, because the whole
+// transaction is rolled back at the end and none of it is meant to
+// survive. See property.test.ts for why.
+export async function buildEphemeralRound(tx: Tx, spec: EphemeralRoundSpec): Promise<{ roundId: string }> {
+  const [request] = await tx
+    .insert(schema.requests)
+    .values({
+      userId: spec.hostId,
+      region: "Fixture Region",
+      dateFrom: "2025-06-01",
+      dateTo: "2025-06-10",
+      partySize: spec.guests.length,
+      state: "filled",
+      expiresAt: new Date("2025-07-01T00:00:00Z"),
+    })
+    .returning();
+
+  const [offer] = await tx
+    .insert(schema.offers)
+    .values({
+      requestId: request.id,
+      hostId: spec.hostId,
+      clubId: spec.clubId,
+      courseId: spec.courseId,
+      teeAtLocal: new Date("2025-06-05T09:00:00"),
+      teeTimezone: "Europe/Dublin",
+      state: "confirmed",
+      message: "ZZ Ledger Fixture — property test iteration (rolled back)",
+    })
+    .returning();
+
+  const [round] = await tx
+    .insert(schema.rounds)
+    .values({
+      offerId: offer.id,
+      courseId: spec.courseId,
+      playedOn: "2025-06-05",
+      hostId: spec.hostId,
+      hostConfirmedAt: new Date("2025-06-05T14:00:00Z"),
+      guestConfirmedAt: new Date("2025-06-05T14:05:00Z"),
+    })
+    .returning();
+
+  const participantRows = buildParticipantRows(round.id, spec.hostId, spec.guests, "property test");
+  await tx.insert(schema.roundParticipants).values(participantRows);
 
   return { roundId: round.id };
 }
@@ -352,11 +429,4 @@ async function buildLedgerFixtures(): Promise<LedgerFixtures> {
     standingBalanceNeg5,
     anchorRoundId,
   };
-}
-
-// Used by property.test.ts to give each iteration's round a unique but
-// deterministic marker without a database round-trip to check for
-// collisions.
-export function propertyIterationMarker(seed: number, iteration: number): string {
-  return `property seed=${seed} iter=${iteration}`;
 }

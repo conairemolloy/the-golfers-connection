@@ -443,6 +443,13 @@ before renewal. The app should visibly change in the off-season:
 - **A test that only checks `error !== null` treats a crash as a pass.**
   Assert the error code. 42501 is a policy denial; 42P17 is a broken
   policy, and reads as success to a naive check.
+- **drizzle-kit's spinner swallows migration errors.** A failed
+  db:migrate can look like it hung or succeeded. If a migration seems
+  not to have applied, run the SQL directly to see the real error.
+- **A shared PRNG plus a short-circuit desyncs every later iteration.**
+  `if (!alreadyDone && rand() < 0.3)` skips the draw when the first
+  condition is false, shifting the whole sequence and making a "seeded,
+  reproducible" test drift between runs. Draw first, then decide.
 
 ---
 
@@ -886,6 +893,13 @@ of its own; it's already counted in its inviter's debit. This is the
 precise mechanics behind the 2026-07-29 "member carries both debits"
 decision — credits and debits always sum to the same total per round,
 so the reciprocity incentive can't be gamed by bringing a friend along.
+
+**2026-07-30 — Property tests roll back; scenario tests persist.**
+The append-only ledger means test writes are permanent, so the
+100-iteration property test runs inside a transaction that is rolled
+back — zero permanent footprint, and the idempotency bookkeeping it
+needed disappears with it. Scenario tests keep a small fixed set of
+permanent fixture rounds as a deliberate audit trail.
 
 ---
 
