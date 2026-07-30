@@ -11,9 +11,11 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { authUsers } from "./auth-schema";
@@ -113,6 +115,12 @@ export const clubEventKind = pgEnum("club_event_kind", [
 export const clubEventSeverity = pgEnum("club_event_severity", [
   "info",
   "warning",
+]);
+
+export const pacePreference = pgEnum("pace_preference", [
+  "brisk",
+  "steady",
+  "no_preference",
 ]);
 
 // --- clubs -----------------------------------------------------------------
@@ -224,6 +232,9 @@ export const profiles = pgTable(
     homeClubId: uuid("home_club_id").references(() => clubs.id),
     status: profileStatus("status").notNull().default("applicant"),
     isAdmin: boolean("is_admin").notNull().default(false),
+    pacePreference: pacePreference("pace_preference")
+      .notNull()
+      .default("no_preference"),
     joinedAt: timestamp("joined_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -370,6 +381,7 @@ export const requests = pgTable(
     note: text("note"),
     state: requestState("state").notNull().default("open"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    pacePreference: pacePreference("pace_preference"),
   },
   (table) => [
     index("requests_user_id_idx").on(table.userId),
@@ -423,6 +435,49 @@ export const offers = pgTable(
   ],
 );
 
+// --- availability ----------------------------------------------------------
+
+export const hostAvailability = pgTable(
+  "host_availability",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id),
+    courseId: uuid("course_id").references(() => clubCourses.id),
+    // 0-6, ISO (0 = Monday), null = any day within the date window.
+    weekday: smallint("weekday"),
+    dateFrom: date("date_from"),
+    dateTo: date("date_to"),
+    capacity: integer("capacity").notNull().default(1),
+    minTier: integer("min_tier"),
+    note: text("note"),
+    active: boolean("active").notNull().default(true),
+  },
+  (table) => [
+    index("host_availability_club_id_active_idx").on(table.clubId, table.active),
+    index("host_availability_user_id_idx").on(table.userId),
+    check("host_availability_capacity_check", sql`${table.capacity} > 0`),
+    check(
+      "host_availability_min_tier_check",
+      sql`${table.minTier} is null or ${table.minTier} between 1 and 4`,
+    ),
+    // A window must be recurring (weekday) or bounded (date_from/date_to),
+    // never neither.
+    check(
+      "host_availability_window_check",
+      sql`${table.weekday} is not null or (${table.dateFrom} is not null and ${table.dateTo} is not null)`,
+    ),
+    check(
+      "host_availability_date_range_check",
+      sql`${table.dateFrom} is null or ${table.dateTo} is null or ${table.dateTo} >= ${table.dateFrom}`,
+    ),
+  ],
+);
+
 // --- rounds ----------------------------------------------------------------
 
 export const rounds = pgTable(
@@ -443,6 +498,14 @@ export const rounds = pgTable(
     hostConfirmedAt: timestamp("host_confirmed_at", { withTimezone: true }),
     guestConfirmedAt: timestamp("guest_confirmed_at", { withTimezone: true }),
     settledAt: timestamp("settled_at", { withTimezone: true }),
+    // Copied from club_content at confirmation, so a round from 2027 keeps
+    // showing what was true in 2027 even if club_content changes later.
+    snapshotDressOnCourse: text("snapshot_dress_on_course"),
+    snapshotDressClubhouse: text("snapshot_dress_clubhouse"),
+    snapshotCaddies: text("snapshot_caddies"),
+    snapshotCaddieFeeNote: text("snapshot_caddie_fee_note"),
+    snapshotGuestFeePence: integer("snapshot_guest_fee_pence"),
+    snapshotTakenAt: timestamp("snapshot_taken_at", { withTimezone: true }),
   },
   (table) => [
     index("rounds_course_id_idx").on(table.courseId),
@@ -453,17 +516,30 @@ export const rounds = pgTable(
 export const roundParticipants = pgTable(
   "round_participants",
   {
+    // Surrogate pk: user_id is nullable (a plus-one has none), so it can no
+    // longer anchor the composite pk the table used before Prompt F.
+    id: uuid("id").primaryKey().defaultRandom(),
     roundId: uuid("round_id")
       .notNull()
       .references(() => rounds.id),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => profiles.id),
+    userId: uuid("user_id").references(() => profiles.id),
+    // A plus-one is a non-member brought by a member. Exactly one of
+    // userId / guestName is set. The inviting member carries the debit for
+    // his guest — enforced in application code at M3, not here.
+    guestName: text("guest_name"),
+    isMember: boolean("is_member").notNull().default(true),
     role: roundParticipantRole("role").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.roundId, table.userId] }),
     index("round_participants_user_id_idx").on(table.userId),
+    uniqueIndex("round_participants_round_id_user_id_unique")
+      .on(table.roundId, table.userId)
+      .where(sql`${table.userId} is not null`),
+    check(
+      "round_participants_membership_check",
+      sql`(${table.isMember} and ${table.userId} is not null and ${table.guestName} is null)
+        or (not ${table.isMember} and ${table.userId} is null and ${table.guestName} is not null)`,
+    ),
   ],
 );
 
@@ -631,6 +707,31 @@ export const auditLog = pgTable(
       .defaultNow(),
   },
   (table) => [index("audit_log_actor_id_idx").on(table.actorId)],
+);
+
+export const domainEvents = pgTable(
+  "domain_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    entity: text("entity").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    // The pending-work query: unprocessed rows, oldest first.
+    index("domain_events_processed_at_created_at_idx").on(
+      table.processedAt,
+      table.createdAt,
+    ),
+    index("domain_events_entity_entity_id_idx").on(table.entity, table.entityId),
+  ],
 );
 
 export const featureFlags = pgTable("feature_flags", {

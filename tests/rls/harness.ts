@@ -21,11 +21,16 @@
 // one admin (ADMIN), their two clubs, and the round/ledger pair that
 // exercises ledger isolation are find-or-created against a stable key and
 // left in place forever — this is the one deliberate exception to "every
-// fixture gets a unique run prefix". They are named so they can never be
-// mistaken for real data or counted as real clubs/members:
+// fixture gets a unique run prefix". Alongside them, B's permanent active
+// host_availability row and a permanent guest-name-only (plus-one)
+// round_participants row on the fixed round are find-or-created the same
+// way. They are named so they can never be mistaken for real data or
+// counted as real clubs/members:
 //   - emails under @rls-fixture.invalid (RFC 2606 reserved, unroutable)
 //   - club names prefixed "ZZ RLS Fixture — "
 //   - the ledger entries' reason field: see FIXED_LEDGER_REASON below
+//   - host_availability.note and round_participants.guest_name: see
+//     FIXED_AVAILABILITY_NOTE and FIXED_PLUS_ONE_GUEST_NAME below
 // Any seed script or club-count/member-count query must exclude rows
 // matching the "ZZ RLS Fixture — " club-name prefix and the
 // rls-fixture.invalid email domain.
@@ -120,6 +125,8 @@ const FIXED_CLUB_PREFIX = "ZZ RLS Fixture — ";
 const FIXED_EMAIL_DOMAIN = "rls-fixture.invalid";
 const FIXED_LEDGER_REASON = "RLS FIXTURE — permanent, see tests/rls/harness.ts";
 const FIXED_OFFER_MARKER = "ZZ RLS Fixture — permanent round, see tests/rls/harness.ts";
+const FIXED_AVAILABILITY_NOTE = "ZZ RLS Fixture — permanent availability, see tests/rls/harness.ts";
+const FIXED_PLUS_ONE_GUEST_NAME = "ZZ RLS Fixture — permanent plus-one, see tests/rls/harness.ts";
 
 // --- supabase clients --------------------------------------------------
 
@@ -157,6 +164,8 @@ export interface FixedFixtures {
   requestForRoundId: string;
   offerId: string;
   roundId: string;
+  availabilityBId: string; // B's permanent, active host_availability row at club1
+  plusOneParticipantId: string; // permanent guest-name-only round_participants row on roundId
 }
 
 export interface EphemeralFixtures {
@@ -216,6 +225,37 @@ async function findOrCreateCourse(clubId: string, name: string) {
   const [row] = await db
     .insert(schema.clubCourses)
     .values({ clubId, name, holes: 18, par: 72 })
+    .returning();
+  return row;
+}
+
+async function findOrCreateAvailability(userId: string, clubId: string, note: string) {
+  const existing = await db
+    .select()
+    .from(schema.hostAvailability)
+    .where(and(eq(schema.hostAvailability.userId, userId), eq(schema.hostAvailability.note, note)));
+  if (existing.length > 0) return existing[0];
+  const [row] = await db
+    .insert(schema.hostAvailability)
+    .values({ userId, clubId, weekday: 6, capacity: 1, active: true, note })
+    .returning();
+  return row;
+}
+
+async function findOrCreatePlusOne(roundId: string, guestName: string) {
+  const existing = await db
+    .select()
+    .from(schema.roundParticipants)
+    .where(
+      and(
+        eq(schema.roundParticipants.roundId, roundId),
+        eq(schema.roundParticipants.guestName, guestName),
+      ),
+    );
+  if (existing.length > 0) return existing[0];
+  const [row] = await db
+    .insert(schema.roundParticipants)
+    .values({ roundId, userId: null, guestName, isMember: false, role: "guest" })
     .returning();
   return row;
 }
@@ -403,6 +443,9 @@ async function buildFixedFixtures(admin: SupabaseClient): Promise<FixedFixtures>
     ])
     .onConflictDoNothing();
 
+  const availabilityB = await findOrCreateAvailability(memberBId, club1.id, FIXED_AVAILABILITY_NOTE);
+  const plusOne = await findOrCreatePlusOne(roundId, FIXED_PLUS_ONE_GUEST_NAME);
+
   return {
     club1Id: club1.id,
     club3Id: club3.id,
@@ -414,6 +457,8 @@ async function buildFixedFixtures(admin: SupabaseClient): Promise<FixedFixtures>
     requestForRoundId,
     offerId,
     roundId,
+    availabilityBId: availabilityB.id,
+    plusOneParticipantId: plusOne.id,
   };
 }
 
@@ -641,6 +686,14 @@ export async function teardownFixtures(fixtures: Fixtures): Promise<void> {
   await db.delete(schema.requests).where(eq(schema.requests.id, ephemeral.requestAId));
   await db.delete(schema.requests).where(eq(schema.requests.id, ephemeral.requestBId));
   await db.delete(schema.requests).where(eq(schema.requests.id, ephemeral.requestUnconfirmedId));
+
+  // Ephemeral host_availability rows created by availability.test.ts's
+  // insert assertions — must go before profiles/clubs below, since both
+  // are FK targets.
+  await db.delete(schema.hostAvailability).where(eq(schema.hostAvailability.userId, ephemeral.memberAId));
+  await db
+    .delete(schema.hostAvailability)
+    .where(eq(schema.hostAvailability.userId, ephemeral.unconfirmedId));
 
   await db
     .delete(schema.memberships)

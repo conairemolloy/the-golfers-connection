@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 30 July 2026 (M2 complete)*
+*Last updated: 30 July 2026 (M1 gap closed — Prompt F tables)*
 
 ---
 
@@ -24,7 +24,7 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M1 gap — the Prompt F tables, then M3.
+**Now working on.** M3 — the ledger.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -166,19 +166,16 @@ lines, running balance. Not a points bar.
 - [x] Indexes on all FKs, plus requests(state, date_from) and
       offers(request_id, state)
 - [x] Drop health_check, point /api/health at `select 1`
-- [ ] `domain_events` — id, kind, entity, entity_id, payload jsonb,
+- [x] `domain_events` — id, kind, entity, entity_id, payload jsonb,
       created_at, processed_at nullable, attempts int
-- [ ] `host_availability` — id, user_id, club_id, course_id nullable,
+- [x] `host_availability` — id, user_id, club_id, course_id nullable,
       weekday or date range, capacity int, min_tier, note, active
-- [ ] `round_participants` handles non-member plus-ones — nullable
+- [x] `round_participants` handles non-member plus-ones — nullable
       user_id plus guest_name, is_member bool
-- [ ] `rounds` carries snapshotted form fields — dress, caddie fee,
+- [x] `rounds` carries snapshotted form fields — dress, caddie fee,
       guest fee copied from club_content at confirmation
-- [ ] `profiles.pace_preference` enum(brisk|steady|no_preference)
-- [ ] `requests.pace_preference` same enum
-
-> Prompt F additions were specified after 0002 was generated — these
-> need a follow-up migration before M2's RLS can cover them.
+- [x] `profiles.pace_preference` enum(brisk|steady|no_preference)
+- [x] `requests.pace_preference` same enum
 
 ## M2 — Identity and RLS
 - [ ] Magic link auth, no passwords, 90-day sessions
@@ -887,6 +884,19 @@ unconfirmed case, applicant scope, and a coverage guard asserting every
 public table has RLS and no anon grants. Fixed 42P17 recursion on
 round_participants and thread_members via SECURITY DEFINER helpers
 (migration 0008).
+
+**2026-07-30 — M1 gap closed (Prompt F tables).** domain_events and
+host_availability created; round_participants now supports non-member
+plus-ones (nullable user_id, guest_name, is_member, surrogate uuid pk,
+partial unique index on (round_id, user_id) WHERE user_id IS NOT NULL);
+rounds carries snapshotted form fields; profiles and requests both got
+pace_preference. Schema and column changes via drizzle-kit generate
+(migration 0009), RLS by hand (migration 0010) — host_availability
+gated on ownership plus a club_confirmed membership check for INSERT,
+domain_events service-role-only like audit_log. Confirmed
+round_participants' SELECT policy (rewritten in 0008) never reads the
+row's own user_id, so a plus-one's null user_id doesn't change who can
+see it — no policy change needed there. 110 passing, 0 skipped.
 
 **2026-07-30 — M2a complete.** RLS applied across all 24 public tables,
 44 policies, anon granted nothing anywhere. Five private.* helper
