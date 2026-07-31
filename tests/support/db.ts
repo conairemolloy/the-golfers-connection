@@ -1,0 +1,96 @@
+// Shared Postgres/drizzle connection module for every test suite under
+// tests/ (rls, ledger, requests, offers, availability). Each vitest test
+// file gets a fresh module registry (isolate: true, the default), so
+// every file that touches `db` needs something to close it, or vitest
+// hangs on exit waiting for the socket — see closeDb below. The client
+// is created lazily so files that never touch `db` don't open a
+// connection at all.
+
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { expect } from "vitest";
+import * as schema from "@/db/schema";
+import type { Tx } from "@/lib/ledger";
+
+export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+export const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+export const DATABASE_URL = process.env.DATABASE_URL!;
+
+/**
+ * Throws the suite's own "run via `pnpm test`" message if any required
+ * env var is missing. `suiteDir` names the calling suite (e.g.
+ * "tests/offers") so the error points at the right place; only tests/rls
+ * signs in via supabase-js and needs the anon key, so `opts.anonKey` is
+ * opt-in rather than always checked.
+ */
+export function assertTestEnv(suiteDir: string, opts: { anonKey?: boolean } = {}): void {
+  const needsAnon = opts.anonKey ?? false;
+  const ok = Boolean(SUPABASE_URL) && Boolean(SERVICE_ROLE_KEY) && Boolean(DATABASE_URL) && (!needsAnon || Boolean(ANON_KEY));
+  if (ok) return;
+  const anonClause = needsAnon ? ", NEXT_PUBLIC_SUPABASE_ANON_KEY" : "";
+  throw new Error(
+    `${suiteDir} requires DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL${anonClause} and SUPABASE_SERVICE_ROLE_KEY — ` +
+      "run via `pnpm test`, which loads .env.local.",
+  );
+}
+
+let pgClient: postgres.Sql | undefined;
+let dbInstance: ReturnType<typeof drizzle<typeof schema>> | undefined;
+
+function getDb() {
+  if (!dbInstance) {
+    pgClient = postgres(DATABASE_URL);
+    dbInstance = drizzle(pgClient, { schema });
+  }
+  return dbInstance;
+}
+
+// Proxy so every existing `db.select()/.insert()/...` call site works
+// unchanged, while the underlying connection is still lazy.
+export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getDb(), prop, receiver);
+  },
+});
+
+export async function closeDb(): Promise<void> {
+  if (pgClient) {
+    await pgClient.end({ timeout: 5 });
+    pgClient = undefined;
+    dbInstance = undefined;
+  }
+}
+
+// Runs against the real drizzle instance directly, not through the `db`
+// Proxy above — .transaction() is stateful in a way the plain query
+// builder methods aren't, and this sidesteps any doubt about the
+// Proxy's `receiver` substitution affecting it.
+//
+// The cast narrows PgDatabase['transaction']'s callback from the base
+// PgTransaction type to ledger.ts's Tx (a PostgresJsTransaction, its
+// subtype) — the real runtime value postgres-js hands the callback is
+// already a PostgresJsTransaction, so this only corrects the type, not
+// the behaviour.
+export function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  const database = getDb() as unknown as { transaction: (fn: (tx: Tx) => Promise<T>) => Promise<T> };
+  return database.transaction(fn);
+}
+
+/**
+ * Runs `fn` inside a transaction, then forces a ROLLBACK — the standard
+ * shape for a test that needs to assert on DB state it wrote, without
+ * any of it surviving. `fn` does its own assertions using the `tx` it's
+ * given; this just guarantees cleanup. Tests that expect `fn` itself to
+ * throw (a RequestError) don't need this — an uncaught throw inside the
+ * transaction callback rolls back on its own, and the rejection the
+ * test should assert on is that error, not TransactionRollbackError.
+ */
+export async function runAndRollback(fn: (tx: Tx) => Promise<void>): Promise<void> {
+  const outcome = withTransaction(async (tx) => {
+    await fn(tx);
+    tx.rollback();
+  });
+  const { TransactionRollbackError } = await import("drizzle-orm");
+  await expect(outcome).rejects.toBeInstanceOf(TransactionRollbackError);
+}

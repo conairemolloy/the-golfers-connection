@@ -44,57 +44,19 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as schema from "@/db/schema";
+import { ANON_KEY, assertTestEnv, closeDb, db, SUPABASE_URL } from "../support/db";
+import { findAuthUserIdByEmail, supaAdmin } from "../support/auth";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const DATABASE_URL = process.env.DATABASE_URL!;
+assertTestEnv("tests/rls", { anonKey: true });
 
-if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE_KEY || !DATABASE_URL) {
-  throw new Error(
-    "tests/rls requires DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and " +
-      "SUPABASE_SERVICE_ROLE_KEY — run via `pnpm test`, which loads .env.local.",
-  );
-}
-
-// A dedicated connection, not the app's src/db/index.ts singleton: that
-// one is designed to stay open for the lifetime of a server process. Each
-// vitest file gets a fresh module registry (isolate: true, the default),
-// so every file that touches `db` would otherwise open a connection with
-// nothing to close it, and vitest hangs on exit waiting for the socket.
-// Created lazily so files that never touch `db` (most of them — they only
-// need supabase-js clients) don't open a connection at all.
-let pgClient: postgres.Sql | undefined;
-let dbInstance: ReturnType<typeof drizzle<typeof schema>> | undefined;
-
-function getDb() {
-  if (!dbInstance) {
-    pgClient = postgres(DATABASE_URL);
-    dbInstance = drizzle(pgClient, { schema });
-  }
-  return dbInstance;
-}
-
-// Proxy so every existing `db.select()/.insert()/...` call site below
-// works unchanged, while the underlying connection is still lazy.
-export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getDb(), prop, receiver);
-  },
-});
-
-export async function closeDb(): Promise<void> {
-  if (pgClient) {
-    await pgClient.end({ timeout: 5 });
-    pgClient = undefined;
-    dbInstance = undefined;
-  }
-}
+// The pg client, drizzle proxy and closeDb (a dedicated connection, not
+// the app's src/db/index.ts singleton — see tests/support/db.ts for why)
+// and supaAdmin/findAuthUserIdByEmail all live in tests/support; only
+// this suite's own signInAs/supaAnon/PASSWORD/ensureAuthUser/
+// setMemberProfile (below) are unique to the hostile-member RLS setup.
+export { closeDb, db };
 
 export const PASSWORD = "Rls-Test-Suite-Passw0rd-1!";
 
@@ -130,11 +92,7 @@ const FIXED_PLUS_ONE_GUEST_NAME = "ZZ RLS Fixture — permanent plus-one, see te
 
 // --- supabase clients --------------------------------------------------
 
-export function supaAdmin(): SupabaseClient {
-  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+export { supaAdmin };
 
 export function supaAnon(): SupabaseClient {
   return createClient(SUPABASE_URL, ANON_KEY, {
@@ -258,13 +216,6 @@ async function findOrCreatePlusOne(roundId: string, guestName: string, invitedBy
     .values({ roundId, userId: null, guestName, isMember: false, invitedBy, role: "guest" })
     .returning();
   return row;
-}
-
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const rows = await db.execute<{ id: string }>(
-    sql`select id from auth.users where email = ${email} limit 1`,
-  );
-  return rows[0]?.id ?? null;
 }
 
 async function ensureAuthUser(admin: SupabaseClient, email: string): Promise<string> {

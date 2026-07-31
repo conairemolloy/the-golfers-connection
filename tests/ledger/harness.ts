@@ -30,109 +30,22 @@
 // back, via buildEphemeralRound below (not findOrCreateRound — there is
 // nothing to find-or-create when nothing survives the test). See that
 // file for why.
+//
+// The pg client, closeDb, withTransaction and supaAdmin all live in
+// tests/support — see that module for the full reasoning behind each.
 
-import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { eq } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import type { Tx } from "@/lib/ledger";
+import { assertTestEnv, db, ensureProfile } from "../support";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const DATABASE_URL = process.env.DATABASE_URL!;
+assertTestEnv("tests/ledger");
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !DATABASE_URL) {
-  throw new Error(
-    "tests/ledger requires DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY — " +
-      "run via `pnpm test`, which loads .env.local.",
-  );
-}
-
-let pgClient: postgres.Sql | undefined;
-let dbInstance: ReturnType<typeof drizzle<typeof schema>> | undefined;
-
-function getDb() {
-  if (!dbInstance) {
-    pgClient = postgres(DATABASE_URL);
-    dbInstance = drizzle(pgClient, { schema });
-  }
-  return dbInstance;
-}
-
-export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getDb(), prop, receiver);
-  },
-});
-
-export async function closeDb(): Promise<void> {
-  if (pgClient) {
-    await pgClient.end({ timeout: 5 });
-    pgClient = undefined;
-    dbInstance = undefined;
-  }
-}
-
-// Runs against the real drizzle instance directly, not through the `db`
-// Proxy above — .transaction() is stateful in a way the plain query
-// builder methods aren't, and this sidesteps any doubt about the
-// Proxy's `receiver` substitution affecting it.
-//
-// The cast narrows PgDatabase['transaction']'s callback from the base
-// PgTransaction type to ledger.ts's Tx (a PostgresJsTransaction, its
-// subtype) — the real runtime value postgres-js hands the callback is
-// already a PostgresJsTransaction, so this only corrects the type, not
-// the behaviour.
-export function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const database = getDb() as unknown as { transaction: (fn: (tx: Tx) => Promise<T>) => Promise<T> };
-  return database.transaction(fn);
-}
-
-function supaAdmin(): SupabaseClient {
-  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+export { closeDb, db, withTransaction } from "../support";
 
 const FIXED_EMAIL_DOMAIN = "ledger-fixture.invalid";
 const FIXED_CLUB_NAME = "ZZ Ledger Fixture — Club";
 const MARKER_PREFIX = "ZZ Ledger Fixture — ";
-
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const rows = await db.execute<{ id: string }>(
-    sql`select id from auth.users where email = ${email} limit 1`,
-  );
-  return rows[0]?.id ?? null;
-}
-
-async function ensureMemberProfile(label: string): Promise<string> {
-  const email = `${label}@${FIXED_EMAIL_DOMAIN}`;
-  const admin = supaAdmin();
-  let userId = await findAuthUserIdByEmail(email);
-  if (!userId) {
-    const { data, error } = await admin.auth.admin.createUser({
-      email,
-      password: "Ledger-Test-Suite-Passw0rd-1!",
-      email_confirm: true,
-    });
-    if (error || !data.user) {
-      throw new Error(`createUser failed for ${email}: ${error?.message}`);
-    }
-    userId = data.user.id;
-  }
-
-  await db
-    .update(schema.profiles)
-    .set({
-      status: "member",
-      displayName: `ZZ Ledger Fixture — ${label}`,
-      initials: label.slice(0, 2).toUpperCase(),
-    })
-    .where(eq(schema.profiles.id, userId));
-
-  return userId;
-}
 
 export async function ensureClubAndCourse(): Promise<{ clubId: string; courseId: string }> {
   const existingClub = await db.select().from(schema.clubs).where(eq(schema.clubs.name, FIXED_CLUB_NAME));
@@ -357,12 +270,13 @@ export function ensureLedgerFixtures(): Promise<LedgerFixtures> {
 }
 
 async function buildLedgerFixtures(): Promise<LedgerFixtures> {
+  const opts = { domain: FIXED_EMAIL_DOMAIN, markerPrefix: MARKER_PREFIX };
   const [memberA, memberB, memberC, memberD, memberE] = await Promise.all([
-    ensureMemberProfile("member-a"),
-    ensureMemberProfile("member-b"),
-    ensureMemberProfile("member-c"),
-    ensureMemberProfile("member-d"),
-    ensureMemberProfile("member-e"),
+    ensureProfile("member-a", opts),
+    ensureProfile("member-b", opts),
+    ensureProfile("member-c", opts),
+    ensureProfile("member-d", opts),
+    ensureProfile("member-e", opts),
   ]);
 
   const [
@@ -373,12 +287,12 @@ async function buildLedgerFixtures(): Promise<LedgerFixtures> {
     standingBalanceNeg3,
     standingBalanceNeg5,
   ] = await Promise.all([
-    ensureMemberProfile("standing-pos-1"),
-    ensureMemberProfile("standing-zero"),
-    ensureMemberProfile("standing-neg-1"),
-    ensureMemberProfile("standing-neg-2"),
-    ensureMemberProfile("standing-neg-3"),
-    ensureMemberProfile("standing-neg-5"),
+    ensureProfile("standing-pos-1", opts),
+    ensureProfile("standing-zero", opts),
+    ensureProfile("standing-neg-1", opts),
+    ensureProfile("standing-neg-2", opts),
+    ensureProfile("standing-neg-3", opts),
+    ensureProfile("standing-neg-5", opts),
   ]);
 
   // Dedicated anchor round, never settled, never touched by any settle.ts

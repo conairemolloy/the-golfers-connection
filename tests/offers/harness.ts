@@ -12,117 +12,24 @@
 // as tests/requests and tests/ledger — profiles.id is a FK to
 // auth.users.id, created through Supabase's HTTP API, outside any DB
 // transaction this suite controls.
+//
+// The pg client, closeDb, withTransaction, runAndRollback, supaAdmin
+// and the ephemeral builders (createClub/createCourse/setMembership/
+// setBalance/futureDate/createOpenRequest) all live in tests/support —
+// see that module for the full reasoning behind each.
 
-import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { expect } from "vitest";
-import * as schema from "@/db/schema";
 import type { Tx } from "@/lib/ledger";
 import { acceptOffer, makeOffer, type MakeOfferInput } from "@/lib/offers";
+import { assertTestEnv, ensureProfile, futureDate } from "../support";
+import * as support from "../support";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const DATABASE_URL = process.env.DATABASE_URL!;
+assertTestEnv("tests/offers");
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !DATABASE_URL) {
-  throw new Error(
-    "tests/offers requires DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY — " +
-      "run via `pnpm test`, which loads .env.local.",
-  );
-}
-
-let pgClient: postgres.Sql | undefined;
-let dbInstance: ReturnType<typeof drizzle<typeof schema>> | undefined;
-
-function getDb() {
-  if (!dbInstance) {
-    pgClient = postgres(DATABASE_URL);
-    dbInstance = drizzle(pgClient, { schema });
-  }
-  return dbInstance;
-}
-
-export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getDb(), prop, receiver);
-  },
-});
-
-export async function closeDb(): Promise<void> {
-  if (pgClient) {
-    await pgClient.end({ timeout: 5 });
-    pgClient = undefined;
-    dbInstance = undefined;
-  }
-}
-
-// See tests/ledger/harness.ts's withTransaction for why this goes
-// through the real drizzle instance directly, and why the cast is safe.
-export function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const database = getDb() as unknown as { transaction: (fn: (tx: Tx) => Promise<T>) => Promise<T> };
-  return database.transaction(fn);
-}
-
-/**
- * Runs `fn` inside a transaction, then forces a ROLLBACK. See
- * tests/requests/harness.ts's runAndRollback for the full reasoning —
- * identical here.
- */
-export async function runAndRollback(fn: (tx: Tx) => Promise<void>): Promise<void> {
-  const outcome = withTransaction(async (tx) => {
-    await fn(tx);
-    tx.rollback();
-  });
-  const { TransactionRollbackError } = await import("drizzle-orm");
-  await expect(outcome).rejects.toBeInstanceOf(TransactionRollbackError);
-}
-
-function supaAdmin(): SupabaseClient {
-  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+export { closeDb, db, runAndRollback, withTransaction } from "../support";
+export { futureDate, setMembership } from "../support";
 
 const FIXED_EMAIL_DOMAIN = "offers-fixture.invalid";
 const MARKER_PREFIX = "ZZ Offers Fixture — ";
-
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const rows = await db.execute<{ id: string }>(
-    sql`select id from auth.users where email = ${email} limit 1`,
-  );
-  return rows[0]?.id ?? null;
-}
-
-async function ensureMemberProfile(label: string): Promise<string> {
-  const email = `${label}@${FIXED_EMAIL_DOMAIN}`;
-  const admin = supaAdmin();
-  let userId = await findAuthUserIdByEmail(email);
-  if (!userId) {
-    const { data, error } = await admin.auth.admin.createUser({
-      email,
-      password: "Offers-Test-Suite-Passw0rd-1!",
-      email_confirm: true,
-    });
-    if (error || !data.user) {
-      throw new Error(`createUser failed for ${email}: ${error?.message}`);
-    }
-    userId = data.user.id;
-  }
-
-  await db
-    .update(schema.profiles)
-    .set({
-      status: "member",
-      displayName: `${MARKER_PREFIX}${label}`,
-      initials: label.slice(0, 2).toUpperCase(),
-      discretionMode: false,
-    })
-    .where(eq(schema.profiles.id, userId));
-
-  return userId;
-}
 
 export interface OfferFixtures {
   requesterA: string;
@@ -142,63 +49,28 @@ export function ensureOfferFixtures(): Promise<OfferFixtures> {
 }
 
 async function buildOfferFixtures(): Promise<OfferFixtures> {
+  const opts = { domain: FIXED_EMAIL_DOMAIN, markerPrefix: MARKER_PREFIX, discretionMode: false };
   const [requesterA, requesterB, hostA, hostB, hostC] = await Promise.all([
-    ensureMemberProfile("requester-a"),
-    ensureMemberProfile("requester-b"),
-    ensureMemberProfile("host-a"),
-    ensureMemberProfile("host-b"),
-    ensureMemberProfile("host-c"),
+    ensureProfile("requester-a", opts),
+    ensureProfile("requester-b", opts),
+    ensureProfile("host-a", opts),
+    ensureProfile("host-b", opts),
+    ensureProfile("host-c", opts),
   ]);
   return { requesterA, requesterB, hostA, hostB, hostC };
 }
 
 // --- ephemeral, transaction-scoped builders -------------------------------
-// Everything below writes through the caller's `tx`, not `db` — it only
-// ever needs to exist for the lifetime of that one transaction.
+// Thin wrappers over tests/support/builders.ts, binding this suite's own
+// MARKER_PREFIX so fixture rows stay in their own namespace.
 
-let clubCounter = 0;
-
-export async function createClub(tx: Tx, opts: { tier: number } = { tier: 2 }): Promise<string> {
-  clubCounter += 1;
-  const [club] = await tx
-    .insert(schema.clubs)
-    .values({
-      name: `${MARKER_PREFIX}Club tier ${opts.tier} #${clubCounter}`,
-      region: "Fixture Region",
-      country: "IE",
-      tier: opts.tier,
-      accessDifficulty: 1,
-      lat: 53.35,
-      lng: -6.26,
-      timezone: "Europe/Dublin",
-    })
-    .returning();
-  return club.id;
+export function createClub(tx: Tx, opts: { tier: number } = { tier: 2 }): Promise<string> {
+  return support.createClub(tx, MARKER_PREFIX, opts);
 }
 
-export async function createCourse(tx: Tx, clubId: string): Promise<string> {
-  const [course] = await tx
-    .insert(schema.clubCourses)
-    .values({ clubId, name: `${MARKER_PREFIX}Course`, holes: 18, par: 72 })
-    .returning();
-  return course.id;
+export function createCourse(tx: Tx, clubId: string): Promise<string> {
+  return support.createCourse(tx, MARKER_PREFIX, clubId);
 }
-
-export async function setMembership(
-  tx: Tx,
-  userId: string,
-  clubId: string,
-  verificationState: "declared" | "documented" | "club_confirmed",
-): Promise<void> {
-  await tx.insert(schema.memberships).values({
-    userId,
-    clubId,
-    verificationState,
-    confirmedAt: verificationState === "club_confirmed" ? new Date() : null,
-  });
-}
-
-let idempotencyCounter = 0;
 
 /**
  * Gives `userId` a specific ledger balance, exactly like
@@ -206,55 +78,8 @@ let idempotencyCounter = 0;
  * decision-1 test: makeOffer must succeed even when the host's standing
  * is 'closed'.
  */
-export async function setBalance(tx: Tx, userId: string, balance: number): Promise<void> {
-  if (balance === 0) return;
-
-  const clubId = await createClub(tx, { tier: 1 });
-  const courseId = await createCourse(tx, clubId);
-  const [request] = await tx
-    .insert(schema.requests)
-    .values({
-      userId,
-      region: "Fixture Region",
-      dateFrom: "2025-06-01",
-      dateTo: "2025-06-10",
-      partySize: 1,
-      state: "filled",
-      expiresAt: new Date("2025-07-01T00:00:00Z"),
-    })
-    .returning();
-  const [offer] = await tx
-    .insert(schema.offers)
-    .values({
-      requestId: request.id,
-      hostId: userId,
-      clubId,
-      courseId,
-      teeAtLocal: new Date("2025-06-05T09:00:00"),
-      teeTimezone: "Europe/Dublin",
-      state: "confirmed",
-    })
-    .returning();
-  const [round] = await tx
-    .insert(schema.rounds)
-    .values({ offerId: offer.id, courseId, playedOn: "2025-06-05", hostId: userId })
-    .returning();
-
-  idempotencyCounter += 1;
-  await tx.insert(schema.ledgerEntries).values({
-    userId,
-    roundId: round.id,
-    direction: balance > 0 ? "credit" : "debit",
-    amount: Math.abs(balance),
-    reason: "test setup — setBalance",
-    idempotencyKey: `offers-test-setup:${idempotencyCounter}`,
-  });
-}
-
-export function futureDate(daysFromNow: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysFromNow);
-  return d.toISOString().slice(0, 10);
+export function setBalance(tx: Tx, userId: string, balance: number): Promise<void> {
+  return support.setBalance(tx, MARKER_PREFIX, "offers-test-setup", userId, balance);
 }
 
 /** A local (no-offset) tee-time string on the given day, per teeAtLocal's convention. */
@@ -263,28 +88,19 @@ export function localTeeTime(daysFromNow: number, time = "09:00:00"): string {
 }
 
 /** Directly inserts an open request and its targets — bypasses createRequest's own tier/standing/validation checks, which are requests.ts's concern, not offers.ts's. */
-export async function createOpenRequest(
+export function createOpenRequest(
   tx: Tx,
   userId: string,
   targetClubIds: string[],
   opts: { dateFrom?: string; dateTo?: string; partySize?: number } = {},
 ): Promise<string> {
-  const dateFrom = opts.dateFrom ?? futureDate(10);
-  const dateTo = opts.dateTo ?? futureDate(12);
-  const [request] = await tx
-    .insert(schema.requests)
-    .values({
-      userId,
-      region: "Fixture Region",
-      dateFrom,
-      dateTo,
-      partySize: opts.partySize ?? 2,
-      state: "open",
-      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-    })
-    .returning();
-  await tx.insert(schema.requestTargets).values(targetClubIds.map((clubId) => ({ requestId: request.id, clubId })));
-  return request.id;
+  return support.createOpenRequest(
+    tx,
+    userId,
+    targetClubIds,
+    { dateFrom: futureDate(10), dateTo: futureDate(12) },
+    opts,
+  );
 }
 
 export interface AcceptedRoundFixture {
@@ -319,7 +135,7 @@ export async function buildAcceptedRound(
 ): Promise<AcceptedRoundFixture> {
   const clubId = await createClub(tx);
   const courseId = await createCourse(tx, clubId);
-  await setMembership(tx, opts.hostId, clubId, "club_confirmed");
+  await support.setMembership(tx, opts.hostId, clubId, "club_confirmed");
 
   const requestId = await createOpenRequest(tx, opts.requesterId, [clubId], {
     dateFrom: opts.requestDateFrom,
