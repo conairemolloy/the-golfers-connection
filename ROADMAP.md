@@ -487,6 +487,14 @@ before renewal. The app should visibly change in the off-season:
   an error, and the summary just looks smaller. Caught this on
   tests/availability — 26 tests invisible. Check the file count in the
   summary, not just the pass count.
+- **vitest's globalSetup is not covered by any timeout.** setup() and
+  teardown() are called with a plain await in vitest 4's core — neither
+  testTimeout nor hookTimeout wraps them. A connection opened in
+  globalSetup and reused at teardown sits idle for the whole run;
+  Supabase's pooler drops it, and postgres-js then hangs on the OS TCP
+  retransmission timeout rather than failing fast. That's a multi-minute
+  stall no timeout will catch. Fixed by idle_timeout on the client, not
+  by a wrapper — the wrapper would only relabel the symptom.
 
 ---
 

@@ -40,7 +40,17 @@ let dbInstance: ReturnType<typeof drizzle<typeof schema>> | undefined;
 
 function getDb() {
   if (!dbInstance) {
-    pgClient = postgres(DATABASE_URL);
+    // Supabase's pooler drops idle connections; a single-worker run
+    // (vitest.config.ts: maxWorkers 1, fileParallelism false) leaves
+    // connections idle between files, and postgres-js won't notice a
+    // connection died server-side until it tries to use it again — at
+    // which point, with none of these set, it hangs on the OS's own TCP
+    // retransmission timeout rather than failing fast. idle_timeout
+    // closes connections client-side before the pooler can drop them
+    // out from under us; max_lifetime bounds how long any one
+    // connection is trusted; connect_timeout bounds how long a fresh
+    // connection attempt is allowed to hang.
+    pgClient = postgres(DATABASE_URL, { idle_timeout: 20, max_lifetime: 60 * 30, connect_timeout: 10 });
     dbInstance = drizzle(pgClient, { schema });
   }
   return dbInstance;
@@ -77,6 +87,17 @@ export function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   return database.transaction(fn);
 }
 
+// Codes seen when the connection died out from under us — a dropped
+// pooler connection or a genuine network hiccup — as opposed to a
+// TransactionRollbackError, which means the transaction ran fine and
+// rolled back exactly as asked.
+const CONNECTION_ERROR_CODES = new Set(["CONNECTION_CLOSED", "ECONNRESET", "ETIMEDOUT"]);
+
+function connectionErrorCode(err: unknown): string | undefined {
+  const code = err && typeof err === "object" && "code" in err ? (err as { code: unknown }).code : undefined;
+  return typeof code === "string" && CONNECTION_ERROR_CODES.has(code) ? code : undefined;
+}
+
 /**
  * Runs `fn` inside a transaction, then forces a ROLLBACK — the standard
  * shape for a test that needs to assert on DB state it wrote, without
@@ -92,5 +113,19 @@ export async function runAndRollback(fn: (tx: Tx) => Promise<void>): Promise<voi
     tx.rollback();
   });
   const { TransactionRollbackError } = await import("drizzle-orm");
-  await expect(outcome).rejects.toBeInstanceOf(TransactionRollbackError);
+  try {
+    await outcome;
+  } catch (err) {
+    const code = connectionErrorCode(err);
+    if (code) {
+      throw new Error(
+        `runAndRollback: lost the database connection (${code}) partway through — this is a network failure ` +
+          "talking to the database, not a test failure. The assertions inside this test were never reached.",
+        { cause: err },
+      );
+    }
+    expect(err).toBeInstanceOf(TransactionRollbackError);
+    return;
+  }
+  expect.fail("runAndRollback: transaction resolved instead of rolling back");
 }
