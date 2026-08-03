@@ -30,4 +30,13 @@ describe("MastheadView", () => {
     expect(html).not.toContain("Verified");
     expect(html).not.toContain("Applicant");
   });
+
+  it("renders no em dash for a nameless applicant, and still shows their status", () => {
+    const html = renderToStaticMarkup(
+      createElement(MastheadView, { current: fixtureCurrentMember("applicant"), homeClubName: null }),
+    );
+    expect(html).not.toContain("—");
+    expect(html).toContain("Applicant");
+    expect(html).toContain("Application in progress");
+  });
 });

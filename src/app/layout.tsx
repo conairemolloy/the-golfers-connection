@@ -39,7 +39,7 @@ export default function RootLayout({
             reads as a phone-shaped members' handbook rather than a
             dashboard; full-bleed below that width for free, since
             max-width only clamps once the viewport exceeds it. */}
-        <div className="mx-auto flex min-h-full w-full max-w-[460px] flex-col bg-lacquer">
+        <div className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col bg-lacquer">
           <Masthead />
           <div className="flex flex-1 flex-col">{children}</div>
         </div>

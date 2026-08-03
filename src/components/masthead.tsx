@@ -27,7 +27,7 @@ export async function Masthead() {
 
 export function MastheadView({ current, homeClubName }: { current: CurrentMember | null; homeClubName: string | null }) {
   const isMember = current?.profile.status === "member";
-  const identity = current ? (current.profile.displayName ?? current.profile.initials ?? "—") : null;
+  const identity = current ? (current.profile.displayName ?? current.profile.initials) : null;
 
   return (
     <header className="flex items-start justify-between gap-4 border-b border-stone/20 px-6 py-5">
@@ -37,7 +37,8 @@ export function MastheadView({ current, homeClubName }: { current: CurrentMember
       </Link>
       {current && (
         <div className="flex flex-col items-end gap-1 text-right">
-          <span className="font-sans text-sm text-paper">{identity}</span>
+          {identity && <span className="font-sans text-sm text-paper">{identity}</span>}
+          {!isMember && !identity && <span className="font-sans text-sm text-stone">Application in progress</span>}
           {homeClubName && <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-stone">{homeClubName}</span>}
           <Label className={isMember ? "text-credit" : undefined}>{isMember ? "Verified" : "Applicant"}</Label>
         </div>
