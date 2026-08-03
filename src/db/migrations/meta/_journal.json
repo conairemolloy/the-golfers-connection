@@ -120,6 +120,20 @@
       "when": 1785453583312,
       "tag": "0016_host_declines",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785759933437,
+      "tag": "0017_spicy_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785759942381,
+      "tag": "0018_magic_link_requests_rls",
+      "breakpoints": true
     }
   ]
 }

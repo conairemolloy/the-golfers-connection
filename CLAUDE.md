@@ -44,8 +44,8 @@ ROADMAP.md in the project root is the source of truth for project state, phases 
 ## Raw SQL objects (not tracked by Drizzle)
 
 These objects were created by hand in raw SQL migrations (0003, 0004,
-0006, 0007, 0008, 0010, 0013, 0016) and do not appear in `schema.ts` or
-any drizzle-kit snapshot:
+0006, 0007, 0008, 0010, 0013, 0016, 0018) and do not appear in
+`schema.ts` or any drizzle-kit snapshot:
 
 - trigger `ledger_entries_no_update_or_delete` + function
   `ledger_entries_immutable()`
@@ -83,14 +83,18 @@ any drizzle-kit snapshot:
 - every RLS policy on every table (0007; round_participants,
   thread_members, rounds, threads, messages and feedback's INSERT
   policy rewritten in 0008; domain_events and host_availability added
-  in 0010; host_declines added in 0016), and the REVOKE/GRANT pair on
-  each table that backs it — domain_events is service-role-only like
-  audit_log (RLS enabled, no policies, no grants), host_availability's
-  INSERT additionally checks for a club_confirmed membership at the
-  target club via a plain EXISTS against memberships (not a
-  self-reference, so no helper needed), host_declines' SELECT is the
-  declining host or the request owner (a plain EXISTS against requests,
-  same shape as offers' SELECT policy) and its INSERT is host-only
+  in 0010; host_declines added in 0016; magic_link_requests added in
+  0018), and the REVOKE/GRANT pair on each table that backs it —
+  domain_events is service-role-only like audit_log (RLS enabled, no
+  policies, no grants), host_availability's INSERT additionally checks
+  for a club_confirmed membership at the target club via a plain EXISTS
+  against memberships (not a self-reference, so no helper needed),
+  host_declines' SELECT is the declining host or the request owner (a
+  plain EXISTS against requests, same shape as offers' SELECT policy)
+  and its INSERT is host-only, magic_link_requests is service-role-only
+  like domain_events/audit_log — table itself is Drizzle-tracked (0017,
+  schema.ts's magicLinkRequests), only the RLS/REVOKE follow-up (0018)
+  is hand-managed, same split as host_availability's 0009/0010
 
 `profiles.is_admin` is the one exception — it goes through `schema.ts`
 and drizzle-kit as normal (0005). `profiles.display_name` and

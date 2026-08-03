@@ -816,3 +816,21 @@ export const featureFlags = pgTable("feature_flags", {
   enabled: boolean("enabled").notNull().default(false),
   scope: text("scope"),
 });
+
+// One row per magic-link send attempt. Backs sendMagicLink's 3-per-15-
+// minute rate limit (src/lib/auth.ts) — a table rather than in-memory
+// state because serverless invocations share no memory. Service-role
+// only, same as domain_events/audit_log: no client ever reads or writes
+// this directly, so it carries no RLS policies and no grants (see the
+// raw-SQL migration that follows the one generating this table).
+export const magicLinkRequests = pgTable(
+  "magic_link_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("magic_link_requests_email_requested_at_idx").on(table.email, table.requestedAt)],
+);

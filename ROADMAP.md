@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 31 July 2026 (M4c complete — host availability matching and graceful decline)*
+*Last updated: 3 August 2026 (M2 complete — magic link auth)*
 
 ---
 
@@ -24,12 +24,13 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M4's service layer is done — request creation, the
-Book query, the offer flow with mutual confirmation, host availability
-matching and graceful decline. The Playwright journey test (request →
-offer → accept → confirm → ledger entry → balance moves) is still
-outstanding: it needs UI/routes to drive, which M4 deliberately built
-none of. Pick it up alongside M5, or whenever the first route lands.
+**Now working on.** M2 is complete — magic link auth (src/lib/auth.ts,
+src/proxy.ts, src/lib/supabase/), no passwords. The first real routes now
+exist (/login, /auth/callback, /auth/signout), but they're auth-only —
+still no UI for the Book, requests or offers, which M4 deliberately built
+none of. The M4 Playwright journey test (request → offer → accept →
+confirm → ledger entry → balance moves) is the actual first unchecked box
+in Build Phases order; pick it up once that UI exists, alongside M5.
 Next up is M5 — Correspondence.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
@@ -88,7 +89,19 @@ obstacles.
 
 - [x] GitHub — private repo
 - [x] Supabase dev project
-- [ ] Vercel — import repo, four env vars, preview deploys per branch
+- [ ] Supabase dashboard — session length for 90-day sessions (Authentication
+      > Sessions in the current dashboard, may have moved — search
+      "session" under Authentication settings if the exact tab differs):
+      the JWT (access token) itself stays short-lived, refreshed silently
+      by the client; it's the session **time-box** setting that caps how
+      long refresh-token rotation is allowed to keep extending a session
+      before a hard re-login — set that to 90 days. Also add
+      `<NEXT_PUBLIC_SITE_URL>/auth/callback` under Authentication > URL
+      Configuration > Redirect URLs — signInWithOtp rejects a redirect
+      that isn't allow-listed there. Code-side magic link auth (M2) is
+      done; this dashboard step is the one piece that can't be done from
+      code.
+- [ ] Vercel — import repo, five env vars, preview deploys per branch
 - [ ] Name decision + trademark clearance (UKIPO/EUIPO free search)
 - [ ] Domain — .com plus .ie or .co.uk, Cloudflare for DNS
 - [ ] Resend — needs domain first; SPF/DKIM/DMARC at least 3 weeks
@@ -189,7 +202,7 @@ lines, running balance. Not a points bar.
 - [x] `requests.pace_preference` same enum
 
 ## M2 — Identity and RLS
-- [ ] Magic link auth, no passwords, 90-day sessions
+- [x] Magic link auth, no passwords, 90-day sessions
 - [x] RLS policy on every table
 - [x] hostile_member test fixture
 - [x] Automated test: hostile member cannot read the directory, another
@@ -653,11 +666,12 @@ pnpm exec tsc --noEmit
 pnpm build
 ```
 
-**Environment** — `.env.local`, never committed. Four variables:
+**Environment** — `.env.local`, never committed. Five variables:
 `DATABASE_URL` (session pooler, port 5432),
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-(dashboard labels this "publishable"), `SUPABASE_SERVICE_ROLE_KEY`.
-`.env.example` documents all four.
+(dashboard labels this "publishable"), `SUPABASE_SERVICE_ROLE_KEY`,
+`NEXT_PUBLIC_SITE_URL` (this deploy's own origin — builds the magic-link
+redirect URL, M2). `.env.example` documents all five.
 
 **Where things live**
 ```
@@ -1064,6 +1078,99 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-08-03 — M2 complete: magic link auth.** No passwords anywhere,
+per the product constraints — this audience will lose one and won't use
+a password manager.
+
+src/lib/supabase/{client,server,admin}.ts — the three Supabase client
+factories: client.ts (browser, "use client" call sites only), server.ts
+(cookies-backed, Server Components/Actions/Route Handlers — always
+constructed per request, never module-scoped), admin.ts (service-role,
+bypasses RLS). admin.ts imports `server-only` (added as a real
+dependency, not hand-rolled) so a browser bundle including it fails at
+build time, not just the first time it runs client-side.
+
+src/proxy.ts — refreshes the Supabase session on every request. Named
+proxy.ts, not middleware.ts as asked: Next 16 deprecated and renamed the
+`middleware` file convention to `proxy` (node_modules/next/dist/docs/
+01-app/03-api-reference/03-file-conventions/proxy.md) — same shape,
+different filename and export name, caught by checking the docs per
+AGENTS.md rather than trusting prior Next.js knowledge. Matcher excludes
+`_next/static`, `_next/image`, `favicon.ico` and `/api/health`. Refresh
+has to happen here rather than per-route because Server Components can't
+set cookies during render (Next's own docs) — proxy is the one place in
+the pipeline guaranteed to have a response it can attach a refreshed
+session's Set-Cookie headers to, regardless of which Server Component
+deep in the tree ends up calling getCurrentMember().
+
+src/lib/auth.ts — resolveCurrentMember(supabase) takes an already-
+constructed Supabase client rather than reading cookies() itself, so it
+has no next/headers dependency and is directly testable with a plain
+signed-in supabase-js client (tests/auth/harness.ts's signInAs, same
+password-auth pattern as tests/rls). getCurrentMember() is the real,
+cached (React cache(), per Next's DAL docs) entry point every route
+should call. requireMember/requireOnboarding take the already-resolved
+CurrentMember | null rather than calling getCurrentMember() themselves —
+kept synchronous and pure so their tests need no DB or Supabase at all,
+just a fixture object, and so a caller that already has `current` doesn't
+pay for a second lookup. callbackRedirectPath(status) is the same move
+applied to /auth/callback's routing decision: a pure function the route
+calls after exchanging the code, tested directly rather than through the
+route handler.
+
+sendMagicLink(email, redirectTo, supabase) — 3 sends per 15 minutes per
+email, tracked in the new magic_link_requests table (migrations 0017 +
+0018), not in memory — serverless has no shared memory across
+invocations. Doesn't take a `tx: Tx` like the request/offer/ledger
+services: the rate-limit row is written before calling signInWithOtp and
+deliberately needs to survive even if that call then throws, which a
+caller-owned transaction would roll back. magic_link_requests is service-
+role-only (RLS enabled, zero policies, REVOKE ALL from anon and
+authenticated — migration 0018), same as domain_events/audit_log: no
+client ever reads or writes it directly.
+
+Routes: /login (Server Component + a `<form action>` Server Action,
+sendMagicLinkAction in src/app/login/actions.ts — no client JS, per
+CLAUDE.md's Server-Components-by-default rule), /auth/callback (GET,
+exchanges the code, routes by profile status via callbackRedirectPath),
+/auth/signout (POST only, deliberately — a GET route would let a plain
+link or prefetch sign someone out).
+
+New env var: NEXT_PUBLIC_SITE_URL, the deploy's own origin, used to build
+the magic-link redirect URL. A fixed env var per deploy target rather
+than deriving the origin from request headers — trusting Host/
+X-Forwarded-Host for an auth redirect is an open-redirect risk.
+
+Two things fought back during testing, both fixed in vitest.config.ts
+rather than production code: `server-only` resolves to a throwing
+index.js by default and only swaps in a no-op under webpack's
+"react-server" export condition, which Vite/vitest never sets — every
+test file importing src/lib/auth.ts failed until `server-only` was
+aliased straight to the package's own empty.js (resolve.alias). Unrelated:
+tests/requests/book.test.ts's cursor-pagination test timed out once in
+the full run and passed cleanly in isolation immediately after — a flake
+(Supabase pooler hiccup, per the existing "vitest's globalSetup is not
+covered by any timeout" entry below), not a regression.
+
+tests/auth/ (17 tests): resolveCurrentMember null-session and happy-path
+cases (real signed-in fixture, tests/auth/harness.ts — own ensureAuthUser/
+signInAs/PASSWORD, same reasoning as tests/rls for keeping its own rather
+than sharing tests/support/auth.ts's ensureProfile), requireMember and
+requireOnboarding against fixture CurrentMember objects for every status,
+callbackRedirectPath for all four statuses plus no-profile, and the rate
+limit's block-the-fourth and allowed-after-the-window cases against a
+stub MagicLinkSender (no real Supabase OTP call — "the point is testing
+our wrappers, not Supabase's OTP delivery"). Fixture emails use
+@auth-fixture.invalid specifically (not e.g. @auth-test.invalid) so
+scripts/seed.ts's existing FIXTURE_EMAIL_PATTERN ("%-fixture.invalid")
+excludes them from its summary counts automatically, the same way it
+already excludes tests/rls's fixtures.
+
+Outstanding from the original ask: Sentry and Vercel preview deploys are
+still M0 boxes, not this one. Session length (90-day sessions via JWT/
+refresh-token settings) can't be set from code — new unticked box under
+Setup & Accounts with the dashboard path.
 
 **2026-07-31 — M0 seed script complete.** `pnpm seed` (scripts/seed.ts),
 `pnpm seed --reset`. src/db/seed/clubs.json holds 20 real clubs across
