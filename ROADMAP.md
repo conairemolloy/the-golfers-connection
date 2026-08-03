@@ -95,6 +95,11 @@ obstacles.
       before the first invitation
 - [ ] Sentry — free tier, wire early
 - [ ] Supabase prod project — separate from dev, before real member data
+      — when this lands, scripts/seed.ts's `--reset` guard pins the dev
+      project's ref explicitly and must be revisited: it would otherwise
+      simply refuse to run against prod (correct), but its failure
+      message currently assumes the dev ref moved, not that it's being
+      pointed at prod, so it should say so clearly.
 - [ ] Stripe — not until charging. Deliberately deferred.
 
 > **Naming blocks more than it looks.** No domain → no email → no
@@ -155,8 +160,8 @@ lines, running balance. Not a points bar.
 ## M0 — Foundations
 - [x] Repo, CI, Drizzle migrations
 - [x] Env validation, health route
-- [ ] Seed script — real club list from src/db/seed/clubs.json,
-      plus 60 synthetic members, 200 rounds, populated ledger
+- [x] Seed script — real club list from src/db/seed/clubs.json,
+      plus synthetic members, requests and a populated ledger
 - [ ] Sentry wired
 - [ ] Vercel preview deploys
 
@@ -495,6 +500,13 @@ before renewal. The app should visibly change in the off-season:
   retransmission timeout rather than failing fast. That's a multi-minute
   stall no timeout will catch. Fixed by idle_timeout on the client, not
   by a wrapper — the wrapper would only relabel the symptom.
+- **Drizzle's `sql` tag spreads a JS array into individual params, not a
+  Postgres array.** `sql\`... = any(${ids})\`` produces
+  `any(($1, $2, $3))` — a row list, not an array — and Postgres rejects
+  it: 42809, "op ANY/ALL (array) requires array on right side". Build
+  the `{...}` literal text yourself and cast it, e.g.
+  `sql\`= any(${'{' + ids.join(',') + '}'}::uuid[])\``. Hit this in
+  scripts/seed.ts's `--reset`.
 
 ---
 
@@ -1052,6 +1064,79 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-07-31 — M0 seed script complete.** `pnpm seed` (scripts/seed.ts),
+`pnpm seed --reset`. src/db/seed/clubs.json holds 20 real clubs across
+Ireland, Northern Ireland, Scotland and England (Royal County Down,
+Royal Portrush — Dunluce and Valley as two courses under one club,
+Portmarnock, Royal Dornoch, Portstewart, Lahinch, Ballybunion, County
+Sligo, Castlerock, Malone, Woodhall Spa, Prestwick, Muirfield,
+Carnoustie, Royal Birkdale, St Andrews, Waterville, The European Club,
+Royal Liverpool, Royal St George's), real names/coordinates/timezones,
+tier and access difficulty flagged provisional pending C1, bearings
+null pending C2 — see "Seed Data Is Real Data" above. Scaled down from
+this section's original "60 members, 200 rounds" to 20 members and 30
+requests on explicit instruction this session, favouring a smaller
+dataset built entirely through real service calls over a larger one;
+the file/script shape (append-only clubs.json, idempotent upsert) is
+what carries forward, not the row counts, so raising them later is a
+matter of adding more MEMBERS/SCENARIOS entries, not restructuring
+anything.
+
+Clubs and courses upsert on name, true upsert (not find-or-skip) so
+correcting a tier or bearing in clubs.json and re-running lands the
+fix. 20 synthetic members (@seed.invalid, real service functions only:
+createRequest, makeOffer, acceptOffer, confirmRound, fillRequest,
+withdrawRequest, declareAvailability — never a raw insert for anything
+that has a service layer), varied handicaps, two in discretion mode,
+club_confirmed memberships spread across all four tiers (half the
+roster gets a second club), ten declare a standing availability window.
+30 requests split 8 settled / 6 open-with-offers / 6 accepted-not-
+confirmed / 6 open-no-offer / 4 withdrawn. The 8 settled ones are
+hand-assigned (not generated) so the standing distribution reliably
+includes both an 'owing' and a 'closed' member without relying on
+chance: a three-host pool credits from five guests, one of whom guests
+three times without ever hosting (balance -3, closed) and one twice
+(balance -2, owing). Every target club was checked by hand against
+requests.ts's tier rule (target.tier >= requester's own tier — "I may
+request into my tier or a worse one," per the existing decision log
+above) when the scenario table was written; one bucket-D entry
+(Ballybunion, tier 2, targeted by a tier-3 requester) got that backwards
+on the first pass and was caught by the tier check throwing
+CLUB_TIER_TOO_HIGH on a real run, not by inspection — retargeted to a
+tier-3 club instead.
+
+Idempotency doesn't key requests on (user, dateFrom, dateTo): dateFrom
+must be >= today at creation time, so a date-based key would start
+duplicating requests the day after first seeding, once "today" has
+moved. Every scenario instead embeds a `[[seed:<key>]]` marker in
+`note` and is looked up by that, independent of which day the script
+runs — confirmed by running `pnpm seed` twice back to back (identical
+summary both times) and separately by `pnpm seed --reset` followed by
+a plain `pnpm seed`, which fully rebuilds the reset slice and reproduces
+the same summary again.
+
+`--reset` deletes only the non-ledger-linked slice of @seed.invalid
+data. It computes the set of rounds with a ledger entry, then
+everything those rounds pin in place transitively (their offer, that
+offer's request, and every host/guest touched along the way), and never
+deletes any of it — ledger_entries is append-only, so those rows, and
+the members who now own them, are permanent, exactly like tests/rls's
+own fixed fixture chain (2026-07-30 entry below). In this dataset that
+resolves to exactly the 8-member settled-round pool staying forever and
+the other 12 members being fully removable; against a run with more
+settled scenarios the computation still holds member-by-member, not as
+an all-or-nothing pool. Refuses to run unless DATABASE_URL or
+NEXT_PUBLIC_SUPABASE_URL references a hard-coded project ref for
+golfers-connection-dev — a "contains 'dev'" substring check was tried
+first and rejected once run against the real project: Supabase project
+refs are opaque random strings, not human-named, so the actual dev
+project's URL doesn't contain "dev" anywhere.
+
+Every count the script prints excludes "ZZ ... Fixture — " club names
+and *-fixture.invalid email domains, so running seed after the RLS
+suite has left its permanent fixture chain in the same database still
+reports only what seed.ts owns.
 
 **2026-07-31 — M4c complete (host availability matching and graceful
 decline). M4's service layer is done.** New service (src/lib/

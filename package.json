@@ -12,7 +12,8 @@
     "db:migrate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "test": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs run",
-    "test:watch": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs"
+    "test:watch": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs",
+    "seed": "NODE_OPTIONS=--experimental-websocket node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/seed.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -36,6 +37,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

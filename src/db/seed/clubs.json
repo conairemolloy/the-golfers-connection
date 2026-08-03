@@ -1,0 +1,286 @@
+{
+  "_readme": "Real club names, regions, countries, coordinates and timezones. tier and accessDifficulty (both 1-4) are PROVISIONAL — set by the developer as placeholders, pending C1 (Nicholl's tiering work). outBearing/inBearing on every course are null pending C2 (course survey). guestFeePence is null wherever the real fee isn't yet known. This file is the single source of truth for both dev seed and production — see the 'Seed Data Is Real Data' section of ROADMAP.md. It is appended to over time as C1 delivers more of the ~150-club launch list; existing rows are corrected in place as real tiers/fees/bearings come in, never replaced wholesale by generated data. scripts/seed.ts upserts on club name (and course name within a club), so edits here land on the next `pnpm seed` run.",
+  "clubs": [
+    {
+      "name": "Royal County Down",
+      "region": "Northern Ireland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 4,
+      "lat": 54.2010,
+      "lng": -5.8871,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Royal Portrush Golf Club",
+      "region": "Northern Ireland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 4,
+      "lat": 55.2074,
+      "lng": -6.6524,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Dunluce Links", "holes": 18, "par": 72, "outBearing": null, "inBearing": null },
+        { "name": "Valley Links", "holes": 18, "par": 65, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Portmarnock Golf Club",
+      "region": "Leinster",
+      "country": "IE",
+      "tier": 1,
+      "accessDifficulty": 3,
+      "lat": 53.4189,
+      "lng": -6.1225,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Old Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Royal Dornoch Golf Club",
+      "region": "Scotland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 2,
+      "lat": 57.8804,
+      "lng": -4.0287,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Course", "holes": 18, "par": 70, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Portstewart Golf Club",
+      "region": "Northern Ireland",
+      "country": "GB",
+      "tier": 2,
+      "accessDifficulty": 2,
+      "lat": 55.1809,
+      "lng": -6.7233,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Strand Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Lahinch Golf Club",
+      "region": "Munster",
+      "country": "IE",
+      "tier": 2,
+      "accessDifficulty": 2,
+      "lat": 52.9335,
+      "lng": -9.3453,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Old Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Ballybunion Golf Club",
+      "region": "Munster",
+      "country": "IE",
+      "tier": 2,
+      "accessDifficulty": 2,
+      "lat": 52.5147,
+      "lng": -9.6683,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Old Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "County Sligo Golf Club",
+      "region": "Connacht",
+      "country": "IE",
+      "tier": 2,
+      "accessDifficulty": 2,
+      "lat": 54.3210,
+      "lng": -8.5780,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Castlerock Golf Club",
+      "region": "Northern Ireland",
+      "country": "GB",
+      "tier": 3,
+      "accessDifficulty": 2,
+      "lat": 55.1706,
+      "lng": -6.7746,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Mussenden Links", "holes": 18, "par": 73, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Malone Golf Club",
+      "region": "Northern Ireland",
+      "country": "GB",
+      "tier": 4,
+      "accessDifficulty": 1,
+      "lat": 54.5590,
+      "lng": -5.9820,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Main Course", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Woodhall Spa Golf Club",
+      "region": "England",
+      "country": "GB",
+      "tier": 3,
+      "accessDifficulty": 2,
+      "lat": 53.1611,
+      "lng": -0.2028,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Hotchkin Course", "holes": 18, "par": 73, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Prestwick Golf Club",
+      "region": "Scotland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 3,
+      "lat": 55.4970,
+      "lng": -4.6122,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Old Course", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "The Honourable Company of Edinburgh Golfers (Muirfield)",
+      "region": "Scotland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 4,
+      "lat": 56.0447,
+      "lng": -2.8266,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Muirfield", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Carnoustie Golf Links",
+      "region": "Scotland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 2,
+      "lat": 56.4972,
+      "lng": -2.7078,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Royal Birkdale Golf Club",
+      "region": "England",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 3,
+      "lat": 53.6314,
+      "lng": -3.0327,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "St Andrews Links",
+      "region": "Scotland",
+      "country": "GB",
+      "tier": 1,
+      "accessDifficulty": 4,
+      "lat": 56.3433,
+      "lng": -2.8028,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Old Course", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Waterville Golf Links",
+      "region": "Munster",
+      "country": "IE",
+      "tier": 3,
+      "accessDifficulty": 2,
+      "lat": 51.8267,
+      "lng": -10.1786,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "The European Club",
+      "region": "Leinster",
+      "country": "IE",
+      "tier": 3,
+      "accessDifficulty": 1,
+      "lat": 52.9430,
+      "lng": -6.1080,
+      "timezone": "Europe/Dublin",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 71, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Royal Liverpool Golf Club",
+      "region": "England",
+      "country": "GB",
+      "tier": 2,
+      "accessDifficulty": 3,
+      "lat": 53.3805,
+      "lng": -3.1810,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 72, "outBearing": null, "inBearing": null }
+      ]
+    },
+    {
+      "name": "Royal St George's Golf Club",
+      "region": "England",
+      "country": "GB",
+      "tier": 2,
+      "accessDifficulty": 3,
+      "lat": 51.2745,
+      "lng": 1.3980,
+      "timezone": "Europe/London",
+      "guestFeePence": null,
+      "courses": [
+        { "name": "Championship Links", "holes": 18, "par": 70, "outBearing": null, "inBearing": null }
+      ]
+    }
+  ]
+}
