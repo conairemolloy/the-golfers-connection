@@ -1,20 +1,30 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, IBM_Plex_Mono, Newsreader } from "next/font/google";
+import { Masthead } from "@/components/masthead";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
   subsets: ["latin"],
+  weight: ["300", "400", "500"],
+  style: ["normal", "italic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const archivo = Archivo({
+  variable: "--font-archivo",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
+
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  title: "The Golfers Connection",
-  description: "The Golfers Connection",
+  title: "The Golfers' Connection",
+  description: "A private reciprocal access network for members of elite clubs in Ireland and Britain",
 };
 
 export default function RootLayout({
@@ -23,11 +33,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${newsreader.variable} ${archivo.variable} ${plexMono.variable} h-full`}>
+      <body className="min-h-full bg-deep font-sans text-paper antialiased">
+        {/* Lacquer column, capped at ~460px and centred on desktop so it
+            reads as a phone-shaped members' handbook rather than a
+            dashboard; full-bleed below that width for free, since
+            max-width only clamps once the viewport exceeds it. */}
+        <div className="mx-auto flex min-h-full w-full max-w-[460px] flex-col bg-lacquer">
+          <Masthead />
+          <div className="flex flex-1 flex-col">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

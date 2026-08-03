@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 3 August 2026 (M2 complete — magic link auth)*
+*Last updated: 3 August 2026 (app shell — design system, masthead, shared primitives)*
 
 ---
 
@@ -24,21 +24,23 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M2 is complete — magic link auth (src/lib/auth.ts,
-src/proxy.ts, src/lib/supabase/), no passwords. The first real routes now
-exist (/login, /auth/callback, /auth/signout), but they're auth-only —
-still no UI for the Book, requests or offers, which M4 deliberately built
-none of. The M4 Playwright journey test (request → offer → accept →
-confirm → ledger entry → balance moves) is the actual first unchecked box
-in Build Phases order; pick it up once that UI exists, alongside M5.
-Next up is M5 — Correspondence.
+**Now working on.** The app shell is complete — design tokens, fonts,
+layout, masthead and shared UI primitives (src/components/ui/), /login
+restyled to match, /apply and /lapsed added as placeholders so every
+callbackRedirectPath destination resolves. No Book, no requests, no
+offers UI yet — the next milestone builds on this shell rather than
+reinventing it. The M4 Playwright journey test (request → offer →
+accept → confirm → ledger entry → balance moves) is the actual first
+unchecked box in Build Phases order; pick it up once that UI exists,
+alongside M5. Next up is M5 — Correspondence.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
 on it — it decides launch quality more than any feature does.
 
-**Design reference.** /design holds the app and landing prototypes.
-They are the visual spec.
+**Design reference.** No separate prototype directory — the design
+system lives in code. See the Design Tokens section below and
+src/app/globals.css for the source of truth.
 
 **The three things that matter most.**
 1. The ledger must be perfect. Everything else is rebuildable.
@@ -520,6 +522,10 @@ before renewal. The app should visibly change in the off-season:
   the `{...}` literal text yourself and cast it, e.g.
   `sql\`= any(${'{' + ids.join(',') + '}'}::uuid[])\``. Hit this in
   scripts/seed.ts's `--reset`.
+- **The dev server and the test suite compete for the same 15-connection
+  pool.** Supabase's free tier caps session-pool connections; a running
+  `pnpm dev` holds several, and `pnpm test` then fails with
+  EMAXCONNSESSION. Stop the dev server before a full run, or expect it.
 
 ---
 
@@ -877,6 +883,13 @@ February, then the Club View (P5) maintains it.*
 ## Decision Log
 > Dated, with reasons. Prevents re-litigating.
 
+**2026-08-03 — /design never existed; corrected two stale references.**
+Read This First and the 2026-07-29 entry below both claimed a /design
+directory of HTML prototypes was the visual spec. It was never built.
+Both now point at the Design Tokens section and src/app/globals.css,
+which is where the tokens, fonts and shared primitives actually live as
+of this session's app shell (masthead, src/components/ui/*).
+
 **2026-07-31 — A window's min_tier is a floor read in the opposite
 direction from the club-tier check.** request_targets' RLS policy and
 requests.ts's tier check both use `club.tier >= my_tier` — "I may
@@ -1025,10 +1038,11 @@ A confirmed round that falls through gets a compensating ledger entry
 with a reason. The original row stays. Preserves the append-only
 invariant and leaves an auditable trail.
 
-**2026-07-29 — Design reference lives in /design.**
-Two HTML prototypes — the app and the landing page — are the visual
-spec for M4–M7. Honours board, not startup. Update them when the
-direction changes rather than letting the direction live only in chat.
+**2026-07-29 — Design reference lives in code, not a separate prototype.**
+See the Design Tokens section above and src/app/globals.css as the
+source of truth. Honours board, not startup. Update the tokens and
+shared primitives directly when the direction changes rather than
+letting it live only in chat.
 
 **2026-07-29 — Cancelled rounds are terminal.**
 A cancelled round is reversed with a compensating entry and never
@@ -1078,6 +1092,79 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-08-03 — App shell: design system, layout, masthead, shared
+primitives.** The first real UI — presentation only, no Book, no
+requests, no offers. Corrects the stale "/design holds the prototypes"
+claim (Decision Log above): the design system lives in code from here
+on.
+
+src/app/globals.css — CLAUDE.md's Design Tokens table as CSS custom
+properties (--lacquer, --deep, --raised, --paper, --gilt, --bright,
+--ink, --stone, --credit, --debit), remapped through `@theme inline` so
+Tailwind utility classes (bg-lacquer, text-gilt, etc.) reach them
+directly — the same indirection the old Geist-era file already used for
+--background/--color-background, kept so the token values have exactly
+one source of truth. Added --radius-hairline (2px, the ceiling this
+product allows anywhere) and a prefers-reduced-motion block collapsing
+all animation/transition durations, per the product constraints.
+
+src/app/layout.tsx — Newsreader (display serif, 300/400/500 + italic),
+Archivo (body/UI, 400/500/600) and IBM Plex Mono (figures/labels,
+400/500) via next/font/google, replacing Geist. Deep background, a
+lacquer content column capped at max-w-[460px] and centred with
+mx-auto — full-bleed below that width falls out for free, since
+max-width only ever clamps a viewport wider than it. Renders Masthead
+once here so every route gets it without repeating the call.
+
+src/components/masthead.tsx — split in two, the same move as auth.ts's
+requireMember/requireOnboarding: Masthead (async, reads getCurrentMember()
+and, only when signed in, a home-club name via a second small query) and
+MastheadView (pure — no cookies(), no DB), so the view half is
+unit-testable with a fixture CurrentMember via renderToStaticMarkup
+rather than needing a real request context. Signed out, no query runs at
+all, not even the home-club lookup. Status reads "Verified" (credit
+green) for profile.status === 'member', "Applicant" (gilt) otherwise —
+sentence case in the markup; the mono/uppercase/letter-spaced look is a
+CSS transform on Label, not literal caps in copy, per CLAUDE.md's
+"sentence case everywhere."
+
+src/components/ui/ — Card, PaperCard (the one surface allowed a shadow),
+Label (also exports LABEL_CLASSES so Field's own <label> can match it
+exactly rather than fighting a polymorphic component), Eyebrow, Rule,
+Button (also exports buttonClasses so EmptyState can style a <Link> as a
+ghost button — an anchor styled like a button, not a button wrapping
+navigation), Field (tone="dark" | "paper", since login's field sits on a
+PaperCard and needs paper-appropriate contrast) and EmptyState
+(heading, one line, optional action — every empty state here is a
+designed screen, never a blank list, per P12 Winter Mode). All server
+components; min-h-11 (44px) on every tap target per the product
+constraints.
+
+/login restyled onto PaperCard + Field + Button, no logic changes. /apply
+and /lapsed added as EmptyState placeholders so callbackRedirectPath's
+four destinations all resolve instead of 404ing — real content is
+explicitly deferred. / now renders an EmptyState too: "Sign in" action
+when signed out, "The Book" placeholder when signed in.
+
+No new vitest suite — this is presentation and the existing 208 tests
+cover the logic beneath it — but one test was added to the existing
+tests/auth/ directory: tests/auth/masthead.test.ts renders MastheadView
+via react-dom/server's renderToStaticMarkup against
+tests/auth/harness.ts's existing fixtureCurrentMember, asserting the
+signed-in member's name and Verified/Applicant status render correctly
+and that signed-out shows neither — no new dependency, no jsdom, no new
+test directory to register in vitest.config.ts. 211 passing, 0 skipped.
+
+Verified by eye against a real dev server: /login signed out (masthead
+with no identity block, paper card, styled field and button) and / signed
+in as an applicant fixture already in the database, using a session built
+via the Supabase admin API's generateLink + verifyOtp(token_hash) rather
+than a real inbox — confirmed the masthead shows the member's name and
+"Applicant" in gilt, and the body shows the placeholder Book EmptyState.
+Caught and fixed a redundant `text-gilt text-gilt` class from this pass:
+Label already defaults to gilt, so MastheadView only needs to override it
+for the member/credit case, not restate it for the applicant/default one.
 
 **2026-08-03 — M2 complete: magic link auth.** No passwords anywhere,
 per the product constraints — this audience will lose one and won't use
