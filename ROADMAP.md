@@ -529,6 +529,12 @@ before renewal. The app should visibly change in the off-season:
   pool.** Supabase's free tier caps session-pool connections; a running
   `pnpm dev` holds several, and `pnpm test` then fails with
   EMAXCONNSESSION. Stop the dev server before a full run, or expect it.
+- **Dev bookkeeping in a member-facing field leaks to the screen.**
+  scripts/seed.ts embedded a `[[seed:<key>]]` marker in requests.note
+  for idempotent lookup; note is display copy, so it rendered on the
+  Book card. Fixed with a dedicated seed_key column (migration 0019).
+  host_availability.note still carries the same marker — harmless
+  today because no UI renders it, a bug the day one does.
 
 ---
 
