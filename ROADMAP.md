@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 5 August 2026 (Book UI and launch-readiness operating model)*
+*Last updated: 6 August 2026 (M4 complete: Book UI, offer flow, e2e journey)*
 
 ---
 
@@ -24,15 +24,10 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** The app shell is complete — design tokens, fonts,
-layout, masthead and shared UI primitives (src/components/ui/), /login
-restyled to match, /apply and /lapsed added as placeholders so every
-callbackRedirectPath destination resolves. No Book, no requests, no
-offers UI yet — the next milestone builds on this shell rather than
-reinventing it. The M4 Playwright journey test (request → offer →
-accept → confirm → ledger entry → balance moves) is the actual first
-unchecked box in Build Phases order; pick it up once that UI exists,
-alongside M5. Next up is M5 — Correspondence.
+**Now working on.** M4 — The Book is complete, including the Playwright
+journey test (request → offer → accept → confirm → ledger entry →
+balance moves, tests/e2e/m4-journey.spec.ts). Next up is M5 —
+Correspondence.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -173,7 +168,8 @@ lines, running balance. Not a points bar.
 # Build Phases
 
 ## M0 — Foundations
-- [x] Repo, CI, Drizzle migrations
+- [x] Repo, CI, Drizzle migrations — repo and Drizzle migrations only;
+      no .github/workflows exists yet, so CI itself is still outstanding
 - [x] Env validation, health route
 - [x] Seed script — real club list from src/db/seed/clubs.json,
       plus synthetic members, requests and a populated ledger
@@ -234,7 +230,7 @@ a weekend.*
 - [x] Offer flow and full state machine
 - [x] Mutual confirmation → ledger write
 - [x] Request expiry job
-- [ ] Playwright: request → offer → accept → confirm → ledger entry →
+- [x] Playwright: request → offer → accept → confirm → ledger entry →
       balance moves
 - [x] Host availability matching — a host declares a window once,
       matching runs automatically, he's nudged only on a fit
@@ -535,6 +531,15 @@ before renewal. The app should visibly change in the off-season:
   Book card. Fixed with a dedicated seed_key column (migration 0019).
   host_availability.note still carries the same marker — harmless
   today because no UI renders it, a bug the day one does.
+- **A "use server" file may export only async functions.** Exporting a
+  constant or map from a Server Action module throws at module
+  evaluation — build and tsc both pass, so it only surfaces when the
+  route is requested.
+- **Fixture-exclusion patterns can hide a test's own fixtures.**
+  excludeFixtureClubs() drops "E2E M4 %" club names; the M4 e2e test
+  named its clubs with that same prefix and they vanished from the page
+  under test. Test fixtures that must be visible to the app need names
+  no filter excludes.
 
 ---
 
@@ -1135,6 +1140,46 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-08-06 — M4 complete: Book UI, offer flow, e2e journey passing.**
+src/app/page.tsx and src/components/request-card.tsx render The Book —
+the open-request list scoped to the viewer's clubs, with a request form
+(src/components/request-form.tsx) for opening one and a "Clubs you hope
+to play" checkbox group filtered to the viewer's tier and below.
+
+src/app/actions/offers.ts adds the offer lifecycle as Server Actions —
+makeOfferAction, acceptOfferAction, confirmRoundAction — each wrapping
+the corresponding src/lib/offers.ts call in a try/catch that maps any
+OfferError to its `code` and redirects to `/?offerError=<CODE>`. The
+page (src/app/page.tsx) looks that code up in a fixed dictionary
+(src/lib/offer-messages.ts's OFFER_ERROR_MESSAGES) and renders only a
+match; an unrecognised code renders nothing. The redirect carries a
+code, never the error's own message text, specifically so a crafted
+`?offerError=` URL can't get arbitrary text displayed on the page.
+
+Two fixes alongside the UI: scripts/seed.ts's idempotency marker moved
+out of requests.note (member-facing copy) into a dedicated seed_key
+column (migration 0019) — the marker had been rendering on Book cards.
+And src/lib/clubs.ts's new excludeFixtureClubs() drops both the RLS
+harness's "ZZ...Fixture — " clubs and the e2e suite's "E2E M4 %" clubs
+from every member-facing club list, so leftover test fixtures — which
+can never be deleted once a settled round references them, per the
+ledger's append-only rule — stay invisible to real members.
+
+tests/e2e/m4-journey.spec.ts is the M4 Playwright journey: request →
+offer → accept → confirm → ledger entry → balance moves, driven through
+the real UI in a real browser. Signs in via the Supabase admin API's
+generateLink + verifyOtp(token_hash) against a plain client, then writes
+the resulting session straight into the browser context as the
+sb-<project-ref>-auth-token cookie — generateLink's own action_link is
+the implicit flow (session in a URL fragment) and never reaches
+/auth/callback, which only handles the PKCE ?code= flow the product
+actually uses, so the test bypasses that link entirely rather than
+exercising a flow the app doesn't have. Its fixture clubs are named
+"Glasswater Links <timestamp>" / "Rathmore Point <timestamp>", not
+prefixed with the test's own "E2E M4" marker, precisely so
+excludeFixtureClubs() doesn't hide them from the page the test is
+driving.
 
 **2026-08-05 — Launch-readiness operating model added.** The roadmap now
 has explicit launch-cell and no-scale gates, a founding-host programme,
