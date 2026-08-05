@@ -386,6 +386,10 @@ export const requests = pgTable(
     handicaps: text("handicaps"),
     flexibility: text("flexibility"),
     note: text("note"),
+    // Dev-only: scripts/seed.ts's idempotent lookup key for a scenario
+    // row. Never set outside the seed script, and never rendered — note
+    // is the member-facing field.
+    seedKey: text("seed_key"),
     state: requestState("state").notNull().default("open"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     pacePreference: pacePreference("pace_preference"),
@@ -404,6 +408,7 @@ export const requests = pgTable(
     index("requests_user_id_idx").on(table.userId),
     index("requests_state_date_from_idx").on(table.state, table.dateFrom),
     index("requests_created_at_id_idx").on(table.createdAt, table.id),
+    uniqueIndex("requests_seed_key_unique").on(table.seedKey).where(sql`${table.seedKey} is not null`),
   ],
 );
 

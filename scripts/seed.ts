@@ -14,16 +14,17 @@
 // IDEMPOTENCY. Clubs/courses upsert on name (clubs) / (club, name)
 // (courses) — editing clubs.json and re-running corrects existing rows
 // in place. Members upsert on email. Memberships/handicaps/availability
-// find-or-create on their natural key. Requests are found again on a
-// `[[seed:<key>]]` marker embedded in `note` rather than on
-// (user, dateFrom, dateTo) — a date-based key would silently start
-// duplicating requests the day after first running this, since dateFrom
-// must be >= today at creation time and "today" moves. The marker makes
-// re-running on any later day a no-op, which is what "run it twice"
-// actually needs to prove. Once a request is found, offers/accept/
-// confirm/fill each re-check current state before acting, so a second
-// run resumes a partially-seeded scenario rather than erroring or
-// duplicating.
+// find-or-create on their natural key. Requests are found again on
+// requests.seed_key rather than on (user, dateFrom, dateTo) — a
+// date-based key would silently start duplicating requests the day
+// after first running this, since dateFrom must be >= today at creation
+// time and "today" moves. seed_key makes re-running on any later day a
+// no-op, which is what "run it twice" actually needs to prove. It's a
+// dedicated column rather than a marker embedded in note, because note
+// is member-facing copy rendered on the Book card. Once a request is
+// found, offers/accept/confirm/fill each re-check current state before
+// acting, so a second run resumes a partially-seeded scenario rather
+// than erroring or duplicating.
 //
 // FIXTURE EXCLUSION. tests/rls leaves a permanent fixture chain in this
 // same database (see tests/rls/harness.ts): clubs named
@@ -420,12 +421,11 @@ async function processScenario(
   clubData: ClubSeed[],
 ): Promise<void> {
   const requesterId = memberIds[scenario.requesterIdx];
-  const marker = `[[seed:${scenario.key}]]`;
 
   const [existingRequest] = await tx
     .select({ id: schema.requests.id })
     .from(schema.requests)
-    .where(and(eq(schema.requests.userId, requesterId), like(schema.requests.note, `%${marker}%`)));
+    .where(eq(schema.requests.seedKey, scenario.key));
 
   let requestId: string;
   if (existingRequest) {
@@ -437,10 +437,14 @@ async function processScenario(
       dateFrom: offsetDate(scenario.dateFromOffset),
       dateTo: offsetDate(scenario.dateToOffset),
       partySize: 1,
-      note: `${scenario.note} ${marker}`,
+      note: scenario.note,
       targetClubIds,
     });
     requestId = newId;
+    // createRequest has no notion of a seed key — it's a dev-only
+    // bookkeeping concern for this script's idempotent lookup, stamped
+    // on after the real service call rather than threaded through it.
+    await tx.update(schema.requests).set({ seedKey: scenario.key }).where(eq(schema.requests.id, requestId));
   }
 
   if (scenario.bucket === "open") return;
