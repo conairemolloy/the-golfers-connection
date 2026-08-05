@@ -1,13 +1,15 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { OFFER_ERROR_MESSAGES } from "@/app/actions/offers";
+import { excludeFixtureClubs } from "@/lib/clubs";
+import { OFFER_ERROR_MESSAGES, type OfferErrorCode } from "@/lib/offer-messages";
 import { AuthError, getCurrentMember, requireMember, type CurrentMember } from "@/lib/auth";
-import type { OfferErrorCode } from "@/lib/offers";
 import { listBook, type BookEntry } from "@/lib/requests";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Eyebrow } from "@/components/ui/eyebrow";
 import { RequestCard, type RequestCardData } from "@/components/request-card";
+import { RequestForm } from "@/components/request-form";
+import { IncomingOfferCard, RoundActionCard, type IncomingOfferData, type RoundActionData } from "@/components/round-actions";
 
 const NON_MEMBER_COPY: Record<"applicant" | "lapsed" | "removed", { heading: string; body: string }> = {
   applicant: {
@@ -29,7 +31,7 @@ export default async function Home({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { offerSent, offerOutsideDates, offerError } = await searchParams;
+  const { offerSent, offerOutsideDates, offerError, requestCreated, requestError, roundCreated, roundConfirmed } = await searchParams;
   const offerErrorMessage =
     typeof offerError === "string" && Object.hasOwn(OFFER_ERROR_MESSAGES, offerError)
       ? OFFER_ERROR_MESSAGES[offerError as OfferErrorCode]
@@ -85,6 +87,15 @@ export default async function Home({
           .where(inArray(schema.clubs.id, relevantClubIds))
       : [];
   const clubById = new Map(clubs.map((c) => [c.id, c]));
+  const memberTier = Math.min(...confirmedClubIds.map((id) => clubById.get(id)?.tier ?? Number.POSITIVE_INFINITY));
+  const targetClubs =
+    Number.isFinite(memberTier)
+      ? await db
+          .select({ id: schema.clubs.id, name: schema.clubs.name, tier: schema.clubs.tier })
+          .from(schema.clubs)
+          .where(and(gte(schema.clubs.tier, memberTier), excludeFixtureClubs()))
+          .orderBy(schema.clubs.tier, schema.clubs.name)
+      : [];
 
   // Courses at the viewer's own confirmed clubs — the only clubs he can
   // ever offer from — keyed by club so each request can filter to just
@@ -135,6 +146,46 @@ export default async function Home({
     };
   });
 
+  const incomingOffers: IncomingOfferData[] = await db
+    .select({
+      offerId: schema.offers.id,
+      clubName: schema.clubs.name,
+      courseName: schema.clubCourses.name,
+      teeAtLocal: schema.offers.teeAtLocal,
+      message: schema.offers.message,
+    })
+    .from(schema.offers)
+    .innerJoin(schema.requests, eq(schema.offers.requestId, schema.requests.id))
+    .innerJoin(schema.clubs, eq(schema.offers.clubId, schema.clubs.id))
+    .innerJoin(schema.clubCourses, eq(schema.offers.courseId, schema.clubCourses.id))
+    .where(and(eq(schema.requests.userId, member.userId), eq(schema.offers.state, "offered")));
+
+  const currentRounds = await db
+    .select({
+      roundId: schema.rounds.id,
+      clubName: schema.clubs.name,
+      courseName: schema.clubCourses.name,
+      playedOn: schema.rounds.playedOn,
+      hostConfirmedAt: schema.rounds.hostConfirmedAt,
+      guestConfirmedAt: schema.rounds.guestConfirmedAt,
+      hostId: schema.rounds.hostId,
+      cancelledAt: schema.rounds.cancelledAt,
+    })
+    .from(schema.rounds)
+    .innerJoin(schema.offers, eq(schema.rounds.offerId, schema.offers.id))
+    .innerJoin(schema.requests, eq(schema.offers.requestId, schema.requests.id))
+    .innerJoin(schema.clubs, eq(schema.offers.clubId, schema.clubs.id))
+    .innerJoin(schema.clubCourses, eq(schema.offers.courseId, schema.clubCourses.id))
+    .where(or(eq(schema.rounds.hostId, member.userId), eq(schema.requests.userId, member.userId)));
+  const today = new Date().toISOString().slice(0, 10);
+  const roundCards: RoundActionData[] = currentRounds.map((round) => ({
+    ...round,
+    canConfirm:
+      !round.cancelledAt &&
+      round.playedOn <= today &&
+      (round.hostId === member.userId ? !round.hostConfirmedAt : !round.guestConfirmedAt),
+  }));
+
   return (
     <main className="flex flex-1 flex-col gap-8 px-6 py-8">
       <div className="flex flex-col gap-2">
@@ -152,19 +203,43 @@ export default async function Home({
         </p>
       )}
       {offerErrorMessage && <p className="font-sans text-sm text-debit">{offerErrorMessage}</p>}
+      {typeof requestCreated === "string" && <p className="font-sans text-sm text-bright">Request opened.</p>}
+      {typeof requestError === "string" && <p className="font-sans text-sm text-debit">That request could not be opened. Check the dates and clubs, then try again.</p>}
+      {typeof roundCreated === "string" && <p className="font-sans text-sm text-bright">Offer accepted. Your round is ready.</p>}
+      {typeof roundConfirmed === "string" && <p className="font-sans text-sm text-bright">Round confirmed.</p>}
+
+      {incomingOffers.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <Eyebrow>Offers for you</Eyebrow>
+          {incomingOffers.map((offer) => <IncomingOfferCard key={offer.offerId} offer={offer} />)}
+        </section>
+      )}
+
+      {roundCards.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <Eyebrow>Your rounds</Eyebrow>
+          {roundCards.map((round) => <RoundActionCard key={round.roundId} round={round} />)}
+        </section>
+      )}
 
       {confirmedClubIds.length === 0 ? (
         <EmptyState heading="Confirmation in progress">
           Your club membership is still being confirmed. The Book will show requests once that&rsquo;s done.
         </EmptyState>
       ) : cards.length === 0 ? (
-        <EmptyState heading="The Book is quiet">Requests targeting your clubs will appear here.</EmptyState>
+        <>
+          <RequestForm targetClubs={targetClubs.map((club) => ({ value: club.id, label: `${club.name} · Tier ${club.tier}` }))} />
+          <EmptyState heading="The Book is quiet">Requests targeting your clubs will appear here.</EmptyState>
+        </>
       ) : (
-        <div className="flex flex-col gap-4">
-          {cards.map((data) => (
-            <RequestCard key={data.requestId} data={data} />
-          ))}
-        </div>
+        <>
+          <RequestForm targetClubs={targetClubs.map((club) => ({ value: club.id, label: `${club.name} · Tier ${club.tier}` }))} />
+          <div className="flex flex-col gap-4">
+            {cards.map((data) => (
+              <RequestCard key={data.requestId} data={data} />
+            ))}
+          </div>
+        </>
       )}
     </main>
   );

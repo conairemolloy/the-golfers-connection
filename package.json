@@ -13,6 +13,7 @@
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "test": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs run",
     "test:watch": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs",
+    "test:e2e": "node --env-file=.env.local node_modules/@playwright/test/cli.js test",
     "seed": "NODE_OPTIONS=--experimental-websocket node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/seed.ts"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
