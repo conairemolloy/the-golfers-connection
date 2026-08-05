@@ -1,6 +1,6 @@
 # The Golfers' Connection — Roadmap
 ### A private reciprocal access network for members of elite clubs in Ireland and Britain
-*Last updated: 3 August 2026 (app shell — design system, masthead, shared primitives)*
+*Last updated: 5 August 2026 (Book UI and launch-readiness operating model)*
 
 ---
 
@@ -294,6 +294,9 @@ a report without asking anything.*
 ## M9 — Money and cover
 - [ ] Stripe Billing, annual plan, founding rate grandfathered
 - [ ] Customer portal, one-click cancellation, dunning emails
+- [ ] Subscription compliance — clear pre-contract information, renewal
+      reminders, cooling-off handling and written cancellation acknowledgement;
+      have counsel confirm the UK/Ireland position before charging
 - [ ] Cover certificate reference on profile and round card
 - [ ] Full subscribe → renew → cancel → lapse cycle against Stripe
       test clocks
@@ -541,6 +544,40 @@ before renewal. The app should visibly change in the off-season:
 
 Ignore: signups, page views, waitlist size. All can look excellent
 while the network quietly fails.
+
+---
+
+## Launch Readiness & Operating Model
+> The first job is proving a dense, trusted network — not opening a broad
+> but empty one. These are launch gates and operating work, not features to
+> defer until after a public launch.
+
+- [ ] **Launch-cell rule** — define a minimum number of committed hosts,
+      eligible guests and participating clubs for a geographic/club cell;
+      measure fill rate and time to first offer by cell, not only network-wide
+- [ ] **No-scale gate** — do not add a club or region until existing cells
+      sustain the target host ratio, request fill rate, time to first offer
+      and an acceptably low incident rate
+- [ ] **Founding-host programme** — recruit hosts before demand, secure an
+      explicit hosting commitment, and give them concierge support and quiet
+      recognition; a waitlist alone is not supply
+- [ ] **Club permission pack** — a concise secretary/committee charter:
+      member vetting, guest-fee handling, cover position, behaviour and
+      escalation path, plus each club's right to cap or withdraw participation
+- [ ] **Concierge pilot** — manually support the first 25–50 matches with a
+      written playbook for vetting, matching, weather cancellation, no-shows,
+      disputes and follow-up; automate only what repeatedly occurs
+- [ ] **Trust and incident policy** — terms, member conduct rules,
+      safeguarding/emergency guidance, complaint SLA, suspension/removal
+      process and insurer-confirmed liability boundaries; The Quiet Word needs
+      an accountable operator as well as a future admin queue
+- [ ] **Privacy and retention review** — document data inventory, lawful
+      bases, retention/deletion rules and access model; complete a DPIA screen
+      before the pilot, then review it as the product adds location, travel,
+      club, handicap, endorsement and feedback data
+- [ ] **Price validation** — test founding price, conversion, renewal intent
+      and effect on hosting behaviour with a small committed cohort before
+      implementing Stripe
 
 ---
 
@@ -1092,6 +1129,13 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-08-05 — Launch-readiness operating model added.** The roadmap now
+has explicit launch-cell and no-scale gates, a founding-host programme,
+club permission pack, concierge pilot, trust/incident policy, privacy and
+retention review, and price validation. M9 now includes subscription
+compliance work alongside billing: pre-contract information, renewal
+reminders, cooling-off handling and written cancellation acknowledgement.
 
 **2026-08-03 — App shell: design system, layout, masthead, shared
 primitives.** The first real UI — presentation only, no Book, no
