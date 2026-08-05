@@ -4,14 +4,32 @@ import postgres from "postgres";
 
 const DATABASE_URL = process.env.DATABASE_URL!;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const APP_URL = "http://localhost:3000";
+const PROJECT_REF = new URL(SUPABASE_URL).hostname.split(".")[0];
+const AUTH_COOKIE_NAME = `sb-${PROJECT_REF}-auth-token`;
 const marker = `E2E M4 ${Date.now()}`;
 const requesterEmail = `requester-${Date.now()}@e2e-fixture.invalid`;
 const hostEmail = `host-${Date.now()}@e2e-fixture.invalid`;
+// Club names below deliberately don't reuse `marker`: src/lib/clubs.ts's
+// excludeFixtureClubs() drops any club matching "E2E M4 %" from every
+// member-facing list, so a club named with that prefix would be invisible to
+// the very page this test drives. "Glasswater Links"/"Rathmore Point" read as
+// plausible club names and don't match that (or the RLS harness's "ZZ...
+// Fixture — ") exclusion pattern, while the trailing timestamp still keeps
+// them identifiable as this test's own rows. Like the other fixtures noted in
+// clubs.ts, these are never deleted — ledger_entries is append-only, so a
+// club with settled rounds against it can't be torn down — and accumulate one
+// pair per run; that's accepted.
+const requesterClubName = `Glasswater Links ${Date.now()}`;
+const hostClubName = `Rathmore Point ${Date.now()}`;
 
 const sql = postgres(DATABASE_URL, { prepare: false, idle_timeout: 5 });
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+const plain = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
@@ -26,17 +44,41 @@ async function createMember(email: string, displayName: string, initials: string
   return data.user.id;
 }
 
+// generateLink's action_link redirects through Supabase's own /verify endpoint,
+// which returns the session in the URL *fragment* (implicit flow) — a fragment
+// never reaches our server, so it can't be handled by src/app/auth/callback,
+// which only understands the ?code= PKCE flow that signInWithOtp actually
+// issues in the product. Rather than exercise a flow the app doesn't use, we
+// redeem the magic link's hashed_token via verifyOtp to get a real session
+// directly, then write it into the browser's cookie jar ourselves. This
+// deliberately bypasses the callback route: this test is exercising the M4
+// request → offer → confirm journey, not the auth flow, which tests/auth
+// already covers.
 async function signIn(browser: Browser, email: string): Promise<BrowserContext> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const { data, error } = await admin.auth.admin.generateLink({
+  const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email,
-    options: { redirectTo: `${APP_URL}/auth/callback` },
   });
-  if (error || !data.properties.action_link) throw new Error(`Could not generate a magic link: ${error?.message}`);
-  await page.goto(data.properties.action_link);
-  await page.waitForURL(`${APP_URL}/`);
+  if (linkError || !linkData.properties.hashed_token) {
+    throw new Error(`Could not generate a magic link: ${linkError?.message}`);
+  }
+
+  const { data: otpData, error: otpError } = await plain.auth.verifyOtp({
+    type: "magiclink",
+    token_hash: linkData.properties.hashed_token,
+  });
+  if (otpError || !otpData.session) {
+    throw new Error(`Could not verify the magic link: ${otpError?.message}`);
+  }
+
+  const context = await browser.newContext();
+  await context.addCookies([
+    {
+      name: AUTH_COOKIE_NAME,
+      value: "base64-" + Buffer.from(JSON.stringify(otpData.session)).toString("base64url"),
+      url: APP_URL,
+    },
+  ]);
   return context;
 }
 
@@ -51,12 +93,12 @@ test("request → offer → accept → confirm settles the ledger", async ({ bro
   ]);
   const [requesterClub] = await sql<{ id: string }[]>`
     insert into clubs (name, region, country, tier, access_difficulty, lat, lng, timezone)
-    values (${`${marker} Requester Club`}, 'Test region', 'IE', 3, 1, 53.0, -6.0, 'Europe/Dublin')
+    values (${requesterClubName}, 'Test region', 'IE', 3, 1, 53.0, -6.0, 'Europe/Dublin')
     returning id
   `;
   const [hostClub] = await sql<{ id: string }[]>`
     insert into clubs (name, region, country, tier, access_difficulty, lat, lng, timezone)
-    values (${`${marker} Host Club`}, 'Test region', 'IE', 3, 1, 53.1, -6.1, 'Europe/Dublin')
+    values (${hostClubName}, 'Test region', 'IE', 3, 1, 53.1, -6.1, 'Europe/Dublin')
     returning id
   `;
   const [hostCourse] = await sql<{ id: string }[]>`
@@ -80,7 +122,7 @@ test("request → offer → accept → confirm settles the ledger", async ({ bro
   await page.getByLabel("To").fill(today);
   await page.getByLabel("Party size").fill("1");
   await page.getByLabel("A note for prospective hosts (optional)").fill(marker);
-  await page.getByLabel(`${marker} Host Club · Tier 3`).check();
+  await page.getByLabel(`${hostClubName} · Tier 3`).check();
   await page.getByRole("button", { name: "Open request" }).click();
   await expect(page.getByText("Request opened.")).toBeVisible();
   await requester.close();

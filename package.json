@@ -13,7 +13,7 @@
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "test": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs run",
     "test:watch": "node --env-file=.env.local --experimental-websocket node_modules/vitest/vitest.mjs",
-    "test:e2e": "node --env-file=.env.local node_modules/@playwright/test/cli.js test",
+    "test:e2e": "NODE_OPTIONS=--experimental-websocket node --env-file=.env.local node_modules/@playwright/test/cli.js test",
     "seed": "NODE_OPTIONS=--experimental-websocket node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/seed.ts"
   },
   "dependencies": {
