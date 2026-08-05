@@ -108,6 +108,20 @@ They are managed by hand in raw SQL migrations. Do not add them to
 and the migration would fail against a database where they already
 exist. Changes to any of them go in a new raw SQL migration.
 
+## Session economy
+
+- Read only what the task names. ROADMAP.md is long — read the specific
+  sections a prompt points at, not the whole file, unless asked to.
+- Do not read node_modules to verify an API unless there is specific
+  reason to doubt it (a version mismatch, a deprecation warning, an
+  error that suggests the signature changed). Check the bundled docs in
+  node_modules/next/dist/docs when the task touches Next.js
+  conventions — that is the exception, per AGENTS.md.
+- When showing generated output for review, show the parts asked for and
+  summarise the rest. Do not print a full migration or a full file
+  unless asked.
+- Prefer targeted grep over reading whole files.
+
 ## Design tokens
 
 For later UI work.

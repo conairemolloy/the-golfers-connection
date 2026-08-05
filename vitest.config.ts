@@ -21,7 +21,8 @@ import { defineConfig } from "vitest/config";
 // repo-hygiene check (currently: that every tests/ subdirectory with a
 // *.test.ts is actually in this include list) — but it's cheap enough to
 // just run in the same pass rather than carve out a second vitest
-// invocation for it.
+// invocation for it. tests/format is the same story: pure date-formatting
+// logic, no database, included here rather than split out.
 export default defineConfig({
   resolve: {
     alias: {
@@ -46,6 +47,7 @@ export default defineConfig({
       "tests/availability/**/*.test.ts",
       "tests/auth/**/*.test.ts",
       "tests/meta/**/*.test.ts",
+      "tests/format/**/*.test.ts",
     ],
     globalSetup: ["./tests/rls/setup.global.ts"],
     pool: "forks",
