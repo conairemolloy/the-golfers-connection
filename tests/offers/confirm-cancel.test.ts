@@ -113,6 +113,62 @@ describe("confirmRound", () => {
       await expect(confirmRound(tx, requesterId, roundId)).rejects.toMatchObject({ code: "ROUND_CANCELLED" });
     });
   });
+
+  it("snapshots club_content and the guest fee onto the round at settlement", async () => {
+    const fixtures = await ensureOfferFixtures();
+    await runAndRollback(async (tx) => {
+      const { roundId, hostId, requesterId, clubId } = await buildAcceptedRound(tx, {
+        requesterId: fixtures.requesterA,
+        hostId: fixtures.hostA,
+        teeAtLocal: localTeeTime(-2),
+      });
+
+      await tx.update(schema.clubs).set({ guestFeePence: 4500 }).where(eq(schema.clubs.id, clubId));
+      await tx.insert(schema.clubContent).values({
+        clubId,
+        dressOnCourse: "Collared shirt, no denim",
+        dressClubhouse: "Jacket after 6pm",
+        caddies: "Available, book ahead",
+        caddieFeeNote: "€50 cash",
+        updatedBy: hostId,
+      });
+
+      await confirmRound(tx, hostId, roundId);
+      await confirmRound(tx, requesterId, roundId);
+
+      const [round] = await tx.select().from(schema.rounds).where(eq(schema.rounds.id, roundId));
+      expect(round.settledAt).not.toBeNull();
+      expect(round.snapshotDressOnCourse).toBe("Collared shirt, no denim");
+      expect(round.snapshotDressClubhouse).toBe("Jacket after 6pm");
+      expect(round.snapshotCaddies).toBe("Available, book ahead");
+      expect(round.snapshotCaddieFeeNote).toBe("€50 cash");
+      expect(round.snapshotGuestFeePence).toBe(4500);
+      expect(round.snapshotTakenAt).not.toBeNull();
+    });
+  });
+
+  it("settles with null snapshot fields when the club has no club_content row", async () => {
+    const fixtures = await ensureOfferFixtures();
+    await runAndRollback(async (tx) => {
+      const { roundId, hostId, requesterId } = await buildAcceptedRound(tx, {
+        requesterId: fixtures.requesterA,
+        hostId: fixtures.hostA,
+        teeAtLocal: localTeeTime(-2),
+      });
+
+      await confirmRound(tx, hostId, roundId);
+      await confirmRound(tx, requesterId, roundId);
+
+      const [round] = await tx.select().from(schema.rounds).where(eq(schema.rounds.id, roundId));
+      expect(round.settledAt).not.toBeNull();
+      expect(round.snapshotDressOnCourse).toBeNull();
+      expect(round.snapshotDressClubhouse).toBeNull();
+      expect(round.snapshotCaddies).toBeNull();
+      expect(round.snapshotCaddieFeeNote).toBeNull();
+      expect(round.snapshotGuestFeePence).toBeNull();
+      expect(round.snapshotTakenAt).not.toBeNull();
+    });
+  });
 });
 
 describe("cancelRound", () => {

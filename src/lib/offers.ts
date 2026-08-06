@@ -6,7 +6,9 @@
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  clubContent,
   clubCourses,
+  clubs,
   domainEvents,
   hostDeclines,
   memberships,
@@ -439,6 +441,35 @@ export async function confirmRound(tx: Tx, userId: string, roundId: string): Pro
   const bothConfirmed = Boolean((role === "host" ? now : round.hostConfirmedAt) && (role === "guest" ? now : round.guestConfirmedAt));
   if (bothConfirmed) {
     await settleRound(tx, roundId);
+
+    // Snapshot the club's current form-guide content onto the round, so a
+    // Card from this round keeps showing what was true now even if
+    // club_content changes later. No row for this club yet is honest as
+    // null, not a reason to block settlement.
+    const [snapshot] = await tx
+      .select({
+        guestFeePence: clubs.guestFeePence,
+        dressOnCourse: clubContent.dressOnCourse,
+        dressClubhouse: clubContent.dressClubhouse,
+        caddies: clubContent.caddies,
+        caddieFeeNote: clubContent.caddieFeeNote,
+      })
+      .from(clubCourses)
+      .innerJoin(clubs, eq(clubCourses.clubId, clubs.id))
+      .leftJoin(clubContent, eq(clubContent.clubId, clubs.id))
+      .where(eq(clubCourses.id, round.courseId));
+
+    await tx
+      .update(rounds)
+      .set({
+        snapshotDressOnCourse: snapshot?.dressOnCourse ?? null,
+        snapshotDressClubhouse: snapshot?.dressClubhouse ?? null,
+        snapshotCaddies: snapshot?.caddies ?? null,
+        snapshotCaddieFeeNote: snapshot?.caddieFeeNote ?? null,
+        snapshotGuestFeePence: snapshot?.guestFeePence ?? null,
+        snapshotTakenAt: now,
+      })
+      .where(eq(rounds.id, roundId));
   }
 
   return { status: "confirmed", bothConfirmed };
