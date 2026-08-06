@@ -141,6 +141,20 @@
       "when": 1785953986517,
       "tag": "0019_flawless_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786055579061,
+      "tag": "0020_system_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786056000000,
+      "tag": "0021_system_profile_auth_hardening",
+      "breakpoints": true
     }
   ]
 }

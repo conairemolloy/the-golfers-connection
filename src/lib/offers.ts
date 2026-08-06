@@ -3,13 +3,14 @@
 // compose writes atomically, and every write goes through the
 // `postgres` role, bypassing RLS entirely (see CLAUDE.md's THREAT MODEL
 // note in 0007_rls_policies.sql).
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, count, eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   clubContent,
   clubCourses,
   clubs,
   domainEvents,
+  handicaps,
   hostDeclines,
   memberships,
   offers,
@@ -22,6 +23,7 @@ import {
   threads,
 } from "@/db/schema";
 import { reverseRound, settleRound, type Tx } from "@/lib/ledger";
+import { postSystemMessage } from "@/lib/threads";
 
 export type { Tx };
 
@@ -268,6 +270,46 @@ export interface AcceptOfferResult {
 }
 
 /**
+ * The auto-posted introduction, read by the host: who the guest is, where
+ * they're normally a member, how long they've belonged to The Golfers'
+ * Connection, their handicap if one is on file, and how many rounds
+ * they've hosted themselves — a trust signal, since most members are both
+ * hosts and guests at different times. Plain sentences, no headings; any
+ * missing fact (no home club, no handicap on file) is dropped rather than
+ * shown as a blank.
+ */
+async function buildIntroduction(tx: Tx, guestId: string): Promise<string> {
+  const [guest] = await tx.select().from(profiles).where(eq(profiles.id, guestId));
+  const homeClub = guest?.homeClubId
+    ? (await tx.select({ name: clubs.name }).from(clubs).where(eq(clubs.id, guest.homeClubId)))[0]
+    : undefined;
+  const [handicap] = await tx.select().from(handicaps).where(eq(handicaps.userId, guestId));
+  const [{ hostedCount }] = await tx
+    .select({ hostedCount: count() })
+    .from(rounds)
+    .where(and(eq(rounds.hostId, guestId), isNotNull(rounds.settledAt)));
+
+  const name = guest?.displayName ?? "This member";
+  const since = guest?.joinedAt.getUTCFullYear();
+
+  const sentences: string[] = [];
+  sentences.push(
+    homeClub
+      ? `${name} plays out of ${homeClub.name} and has been a member of The Golfers' Connection since ${since}.`
+      : `${name} has been a member of The Golfers' Connection since ${since}.`,
+  );
+  if (handicap) {
+    sentences.push(`Handicap index ${handicap.handicapIndex}.`);
+  }
+  const hosted = Number(hostedCount);
+  sentences.push(
+    hosted > 0 ? `They've hosted ${hosted} round${hosted === 1 ? "" : "s"} themselves.` : `They haven't hosted a round yet.`,
+  );
+
+  return sentences.join(" ");
+}
+
+/**
  * One accepted offer does not fill a request — a request is trip-shaped
  * and may name several clubs, so a member may accept several offers
  * against it. The requester closes it explicitly via fillRequest.
@@ -338,6 +380,12 @@ export async function acceptOffer(
     { threadId: thread.id, userId: offer.hostId },
     { threadId: thread.id, userId: requesterId },
   ]);
+
+  // First message in the thread, same transaction as its creation — the
+  // guest is introduced to the host before either of them has said
+  // anything themselves.
+  const introduction = await buildIntroduction(tx, requesterId);
+  await postSystemMessage(tx, thread.id, introduction);
 
   await tx.insert(domainEvents).values([
     {
