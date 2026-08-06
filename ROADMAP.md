@@ -24,10 +24,10 @@ Supabase project `golfers-connection-dev`, region West EU (Ireland).
 **Where we are.** See "Currently Done" below, then the first unchecked
 box in the Build Phases section. That is the next thing to work on.
 
-**Now working on.** M4 — The Book is complete, including the Playwright
-journey test (request → offer → accept → confirm → ledger entry →
-balance moves, tests/e2e/m4-journey.spec.ts). Next up is M5 —
-Correspondence.
+**Now working on.** M5's service layer is done — threads, messages, read
+state, mute, and the auto-posted introduction (src/lib/threads.ts).
+What's left in M5 is the correspondence UI, the pinned round card, trip
+threads, and the no-thread-from-profile test.
 
 **Parallel tracks.** Build Phases (M0–M11) and the Content Workstream
 (C1–C4) run at the same time. Content is not code and does not block
@@ -168,8 +168,10 @@ lines, running balance. Not a points bar.
 # Build Phases
 
 ## M0 — Foundations
-- [x] Repo, CI, Drizzle migrations — repo and Drizzle migrations only;
-      no .github/workflows exists yet, so CI itself is still outstanding
+- [x] Repo, Drizzle migrations
+- [ ] CI — no .github/workflows yet. `pnpm test`, `tsc --noEmit`,
+      `pnpm lint` and `pnpm build` all run locally and are the de facto
+      gate; nothing enforces them on push.
 - [x] Env validation, health route
 - [x] Seed script — real club list from src/db/seed/clubs.json,
       plus synthetic members, requests and a populated ledger
@@ -240,14 +242,17 @@ a weekend.*
       and queryable, never discarded
 
 ## M5 — Correspondence
-- [ ] Threads on accepted offers
-- [ ] Messages, read state, mute
+- [x] Threads on accepted offers
+- [x] Messages, read state, mute
 - [ ] Round card pinned at top of round thread
 - [ ] Trip group threads
 - [ ] Test asserting no thread-from-profile code path exists
-- [ ] Auto-posted introduction as the first entry in every round
+- [x] Auto-posted introduction as the first entry in every round
       thread — name, club, member since, handicap, proposer, times
       hosted
+
+> The service layer (src/lib/threads.ts) is complete. What remains is
+> UI, plus the no-thread-from-profile invariant test.
 
 ## M6 — Clubs
 - [ ] Club pages, club_content form guide
@@ -255,7 +260,7 @@ a weekend.*
 - [ ] Guest fee, member counts, access difficulty
 - [ ] Weather via Open-Meteo, 30-min cache per course
 - [ ] Wind line derived from out_bearing / in_bearing vs wind direction
-- [ ] Form snapshot written onto the round at confirmation
+- [x] Form snapshot written onto the round at confirmation
 
 *"Out into it, home downwind" is the detail members will talk about.
 Two integers per course.*
@@ -540,6 +545,18 @@ before renewal. The app should visibly change in the off-season:
   named its clubs with that same prefix and they vanished from the page
   under test. Test fixtures that must be visible to the app need names
   no filter excludes.
+- **Postgres freezes now() at transaction start.** Two writes in one
+  transaction get identical timestamps, so a "created after last read"
+  comparison is false for a message written after a markRead in the same
+  transaction — which is exactly how the test suite structures every
+  test. Use clock_timestamp() where ordering within a transaction
+  matters. Also avoids app-server/DB clock skew in production.
+- **A row inserted straight into auth.users bypasses GoTrue's own
+  requirements.** Those live in the auth service, not in table
+  constraints, so `INSERT INTO auth.users (id)` succeeds and leaves a
+  row with null email, created_at and metadata. It works until a GoTrue
+  migration adds a NOT NULL column or an admin sweep removes malformed
+  rows — and anything FK'd to it breaks with it.
 
 ---
 
@@ -1140,6 +1157,35 @@ permanent fixture rounds as a deliberate audit trail.
 
 ## Changelog
 > Newest first. One entry per milestone completed.
+
+**2026-08-06 — M5 service layer complete: threads, messages, read state,
+mute, auto-posted introduction. Plus the M6 form snapshot.**
+src/lib/threads.ts adds the correspondence service — listThreads (newest
+activity first, unread counts, club/tee-time joined in for kind
+'round'), readThread, sendMessage, markRead, muteThread/unmuteThread,
+and postSystemMessage for the auto-posted introduction. Every write goes
+through the same `Tx`-taking, RLS-bypassing convention as ledger.ts,
+requests.ts and offers.ts.
+
+messages.sender_id stays NOT NULL: the introduction is authored by a
+reserved system profile (all-zeros uuid, SYSTEM_PROFILE_ID) rather than
+a null sender, so no consumer of messages ever needs a null-sender
+branch. Migration 0020 creates the profile row and the auth.users row
+its FK requires; 0021 fills in the auth.users columns GoTrue normally
+populates at signup (email, created_at, metadata, instance_id, aud,
+role) so the row doesn't look malformed to a future auth migration or
+an admin sweep. It has no password, no auth.identities row and no
+confirmed email — nothing in GoTrue's sign-in flow can resolve to this
+user.
+
+The introduction deliberately does not count toward either member's
+unread count — listThreads' unread queries explicitly exclude
+SYSTEM_PROFILE_ID as a sender, so it reads as a note rather than
+something either side is nudged to act on.
+
+Separately, M6's form snapshot — confirmRound copying club_content's
+dress/caddie-fee/guest-fee fields onto the round at confirmation — is
+done and tested both with and without a club_content row present.
 
 **2026-08-06 — M4 complete: Book UI, offer flow, e2e journey passing.**
 src/app/page.tsx and src/components/request-card.tsx render The Book —
